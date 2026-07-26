@@ -4,4 +4,3 @@ __pycache__/
 .venv/
 data/raw/
 data/*.zip
-submission.csv
