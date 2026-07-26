@@ -1,0 +1,10 @@
+{
+  "predictor": "TVT_input",
+  "method": "pass_through_baseline",
+  "metric": "rmse",
+  "local_score": 0.0,
+  "gate": "screen",
+  "decision": "retained",
+  "evaluated_at": "2026-07-26",
+  "issue": "SOT-1973"
+}
