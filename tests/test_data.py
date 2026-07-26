@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import csv
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +11,7 @@ from pathlib import Path
 from src.data import baseline_predictions, discover_wells
 from src.data import load_submission_targets, write_submission
 from src.evaluate import evaluate_baseline, rmse
+from src.predict import generate_submission
 
 HORIZONTAL_HEADER = ["MD", "X", "Y", "Z", "GR", "TVT_input", "TVT"]
 
@@ -60,6 +64,57 @@ class DataUtilitiesTest(unittest.TestCase):
         write_csv(sample, ["id", "tvt"], [["abc_0", 0]])
         with self.assertRaisesRegex(ValueError, "Prediction ids differ"):
             write_submission(sample, {"wrong_0": 1.0}, self.root / "submission.csv")
+
+    def test_champion_submission_and_exec_runtime_compatibility(self) -> None:
+        self.make_well(
+            "test", "abc", [[1, 2, 3, 4, 5, 101, ""], [2, 2, 3, 4, 5, 102, ""]]
+        )
+        sample = self.root / "sample_submission.csv"
+        output = self.root / "direct.csv"
+        write_csv(sample, ["id", "tvt"], [["abc_1", 0], ["abc_0", 0]])
+        self.assertEqual(generate_submission(self.root / "test", sample, output), 2)
+        self.assertEqual(
+            output.read_text(), "id,tvt\nabc_1,102.0000000000\nabc_0,101.0000000000\n"
+        )
+
+        script = Path(__file__).parents[1] / "src" / "predict.py"
+        exec_output = self.root / "exec.csv"
+        command = [
+            sys.executable,
+            "-c",
+            (
+                "import sys;"
+                "source=open(sys.argv[1], encoding='utf-8').read();"
+                "sys.argv=[sys.argv[1],*sys.argv[2:]];"
+                "exec(compile(source, sys.argv[0], 'exec'), {'__name__':'__main__'})"
+            ),
+            str(script),
+            "--test-dir",
+            str(self.root / "test"),
+            "--sample",
+            str(sample),
+            "--output",
+            str(exec_output),
+        ]
+        with tempfile.TemporaryDirectory() as unrelated_cwd:
+            result = subprocess.run(
+                command,
+                cwd=unrelated_cwd,
+                env={"PATH": os.environ.get("PATH", "")},
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        self.assertIn("Wrote 2 rows", result.stdout)
+        self.assertEqual(exec_output.read_text(), output.read_text())
+
+    def test_champion_uses_sample_baseline_for_withheld_tvt_input(self) -> None:
+        self.make_well("test", "abc", [[1, 2, 3, 4, 5, "", ""]])
+        sample = self.root / "sample_submission.csv"
+        output = self.root / "submission.csv"
+        write_csv(sample, ["id", "tvt"], [["abc_0", 0.0]])
+        generate_submission(self.root / "test", sample, output)
+        self.assertEqual(output.read_text(), "id,tvt\nabc_0,0.0000000000\n")
 
     def test_rmse_and_deterministic_holdout_evaluation(self) -> None:
         score, count = rmse([(1, 2), (3, 3)])
