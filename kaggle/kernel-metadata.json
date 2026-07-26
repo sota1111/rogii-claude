@@ -1,0 +1,13 @@
+{
+  "id": "sota1111/rogii-claude-baseline",
+  "title": "ROGII Claude baseline",
+  "code_file": "rogii-claude-baseline.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": false,
+  "competition_sources": [
+    "rogii-wellbore-geology-prediction"
+  ]
+}
