@@ -37,7 +37,35 @@ This command uses zero as a format-smoke prediction (override with
 that field is not used as a test predictor; it is used only for the train smoke
 KPI below.
 
-## Local metric and hold-out
+## Leakage-free pseudo-blind evaluation contract
+
+Candidate selection uses a two-stage, deterministic pseudo-blind gate:
+
+```bash
+python3 -m src.evaluate pseudo-blind --stage screen
+python3 -m src.evaluate pseudo-blind --stage confirm
+```
+
+- Seed: `2033`; fold: SHA-256 well split `0/5`.
+- Blind unit: one contiguous internal interval covering 20% of each selected
+  horizontal well. The interval start is derived from SHA-256 of
+  `<seed>:<well-id>`.
+- Screen: the first 5 sorted wells in fold 0.
+- Confirm: every train well in fold 0 (156 wells in the 2026-07-26 download).
+- Metrics: row-level RMSE and MAE, both lower-is-better.
+- Leakage-free baseline: linear interpolation between the visible
+  `TVT_input` values immediately outside the blind interval.
+- Promotion threshold: candidate RMSE and MAE must each be no worse than the
+  baseline (`delta <= 0`) at screen and confirm. A screen failure skips confirm.
+
+The predictor contract removes both `TVT` and `TVT_input` from feature rows and
+replaces blind-interval observations with `None`. Truth is retained only by the
+scorer. This makes accidental use of either truth-equivalent column fail in
+tests instead of producing a misleading zero-error score. All candidate
+comparisons must use `evaluate_gate` or the same constants and sanitized
+`BlindWell` contract.
+
+## Legacy smoke metric and hold-out
 
 The exact competition evaluator is not published in the downloaded CSVs. We
 use row-level root mean squared error:
@@ -60,5 +88,5 @@ wells / 262,059 rows. The `tvt = TVT_input` baseline produces RMSE **0.0**.
 
 This perfect value is expected because supplied train `TVT_input` equals train
 `TVT` row-for-row. It is a format/evaluator smoke baseline, not evidence of
-generalization or a useful champion threshold. Later predictors should use the
-same fold membership and avoid held-out `TVT` or `TVT_input` leakage.
+generalization or a useful champion threshold. Candidate promotion must use the
+pseudo-blind gate above, not this legacy smoke metric.
