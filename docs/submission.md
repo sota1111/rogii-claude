@@ -24,3 +24,22 @@ Direct file upload was rejected by the Kaggle API because this competition
 accepts submissions from Notebooks only. The registry therefore retains
 `submit.file` for the generated artifact and also specifies the kernel,
 version, and output fields used by the supported submission route.
+
+## Cycle 2 result (SOT-2035)
+
+SOT-2034's constrained TVT correction failed the mandatory screen gate, so
+cycle 2 made no promotion. The registered `pass_through_baseline` in
+`champion.json` therefore remained the submission champion. Its local generator
+and Kaggle entry point produced byte-identical CSV files with 14,151 finite
+predictions, exact `id,tvt` columns, and the sample submission's ID set and row
+order.
+
+- Kernel: `sota1111/rogii-claude-baseline`, version 2, status `COMPLETE`.
+- Submission reference: `55025165`, status `COMPLETE`.
+- Public score: **11551.955**.
+- Public leaderboard rank at verification time: **5766**.
+- Submitted at: `2026-07-27 09:50:56 UTC`.
+
+The unchanged score matches version 1 and is the expected external confirmation
+for the retained zero-fallback champion. The cycle-2 result is non-promotion:
+no constrained-correction candidate code is present in the inference path.
