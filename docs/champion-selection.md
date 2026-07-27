@@ -57,3 +57,49 @@ The contract baseline was executed against the 2026-07-26 train download:
 
 These values establish the comparison reference; they are not a new submission
 champion score.
+
+## Constrained TVT correction evaluation (SOT-2034)
+
+### Hypothesis and safeguards
+
+This experiment did not retry the earlier unconstrained GR shift. It treated
+the leakage-free interpolation output as a strong TVT prior, matched smoothed
+horizontal-well GR to the same well's type-well `GR(TVT)` curve only within
+±10 TVT units of that prior, and shrank the matched shift before applying it.
+The applied correction was:
+
+- clipped to a small per-row maximum;
+- smoothed with a 21-row moving window;
+- constrained to preserve the prior's local monotonic direction; and
+- evaluated without exposing blind-interval `TVT` or `TVT_input`.
+
+Three simple, pre-fixed correction caps were screened. All used a 0.1 shrink
+factor and the same GR-distance objective with a 0.25 TVT-distance penalty.
+
+### Screen results
+
+The inherited deterministic screen used seed 2033, fold 0/5, a 20% contiguous
+blind interval, and wells `01869cd4`, `03a935ae`, `044af7d1`, `0498acab`, and
+`052d64df` (1,654 blind rows).
+
+| Candidate | Correction cap | RMSE | Δ RMSE | MAE | Δ MAE | Gate |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| interpolation baseline | 0 | 11.035684 | 0 | 8.436288 | 0 | reference |
+| constrained-small | ±0.10 | 11.038747 | +0.003063 | 8.433474 | -0.002813 | fail |
+| constrained-medium | ±0.25 | 11.037853 | +0.002169 | 8.433445 | -0.002843 | fail |
+| constrained-large | ±0.50 | 11.039727 | +0.004044 | 8.438754 | +0.002466 | fail |
+
+`constrained-medium` was the pre-fixed best candidate by the primary metric,
+RMSE. It improved MAE by 0.002843 but regressed RMSE by 0.002169, so it failed
+the inherited requirement that neither metric regress.
+
+### Confirm and promotion decision
+
+Confirm was not run. The SOT-2033 contract makes a passing screen mandatory
+before the single screen winner may enter confirm; running confirm after the
+RMSE failure could not make the candidate eligible for promotion.
+
+The candidate implementation was experimental and has been removed. No
+candidate code remains in `src/`, and `champion.json` plus `src/predict.py`
+continue to identify and execute the `TVT_input` pass-through champion. The
+decision is **non-promotion**.
