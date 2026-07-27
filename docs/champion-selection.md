@@ -38,3 +38,22 @@ below zero, so it was intentionally skipped.
 `champion.json` records `pass_through_baseline` with local RMSE `0.0` and a
 `retained` decision. No GR-correlation predictor code remains in the champion
 path.
+
+## Evaluation contract update (SOT-2033)
+
+The zero-error smoke KPI is no longer a candidate-promotion gate. Future
+candidates use the leakage-free pseudo-blind screen→confirm contract documented
+in `docs/data-and-metric.md`. This issue changes only the evaluation contract:
+the registered `pass_through_baseline` champion and its executable submission
+path remain unchanged until a candidate passes both pseudo-blind stages and is
+confirmed separately on Kaggle.
+
+The contract baseline was executed against the 2026-07-26 train download:
+
+| Stage | Wells | Blind rows | RMSE | MAE |
+| --- | ---: | ---: | ---: | ---: |
+| screen | 5 | 1,654 | 11.035684 | 8.436288 |
+| confirm | 156 | 52,419 | 11.561729 | 7.804169 |
+
+These values establish the comparison reference; they are not a new submission
+champion score.
