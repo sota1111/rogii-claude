@@ -1,6 +1,6 @@
-"""Kaggle Notebook entry point for the retained zero-fallback champion."""
-from pathlib import Path
+"""Kaggle Notebook entry point for the cycle-2 retained zero-fallback champion."""
 import csv
+from pathlib import Path
 
 
 samples = list(Path("/kaggle/input").rglob("sample_submission.csv"))
