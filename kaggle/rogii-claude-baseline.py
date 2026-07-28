@@ -2,7 +2,6 @@
 import csv
 from pathlib import Path
 
-
 samples = list(Path("/kaggle/input").rglob("sample_submission.csv"))
 if len(samples) != 1:
     raise RuntimeError(f"Expected one sample_submission.csv, found {samples}")

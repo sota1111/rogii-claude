@@ -10,9 +10,11 @@ from pathlib import Path
 
 from .data import (
     discover_wells,
+    fit_offset_trend,
     iter_train_pairs,
     load_horizontal,
     load_submission_targets,
+    predict_offset_tvt,
     write_submission,
 )
 
@@ -23,6 +25,7 @@ PSEUDO_BLIND_FRACTION = 0.20
 SCREEN_WELLS = 5
 MAX_RMSE_REGRESSION = 0.0
 MAX_MAE_REGRESSION = 0.0
+TEST_HEEL_FRACTION = 5070 / 19221
 
 
 @dataclass(frozen=True)
@@ -239,6 +242,85 @@ def evaluate_gate(
     return {"promoted": len(stages) == 2 and stages[-1]["passed"], "stages": stages}
 
 
+def evaluate_toe_holdout(
+    train_dir: str | Path,
+    *,
+    stage: str = "screen",
+    heel_fraction: float = TEST_HEEL_FRACTION,
+) -> dict:
+    """Evaluate true suffix extrapolation using the observed test heel proportion."""
+    if stage not in {"screen", "confirm"}:
+        raise ValueError("stage must be 'screen' or 'confirm'")
+    if not 0.0 < heel_fraction < 1.0:
+        raise ValueError("heel_fraction must be between zero and one")
+    selected = sorted(holdout_wells(train_dir, PSEUDO_BLIND_FOLDS, PSEUDO_BLIND_FOLD))
+    if stage == "screen":
+        selected = selected[:SCREEN_WELLS]
+    actual: list[float] = []
+    predictions: dict[str, list[float]] = {
+        "offset_trend": [],
+        "const_offset": [],
+        "zeros": [],
+    }
+    for files in discover_wells(train_dir):
+        if files.well not in selected:
+            continue
+        rows = load_horizontal(files.horizontal, require_target=True)
+        heel_count = max(1, min(len(rows) - 1, round(len(rows) * heel_fraction)))
+        model = fit_offset_trend(rows[:heel_count])
+        for row in rows[heel_count:]:
+            if not row.get("TVT"):
+                continue
+            truth = float(row["TVT"])
+            actual.append(truth)
+            predictions["offset_trend"].append(predict_offset_tvt(model, row))
+            try:
+                z = float(row["Z"])
+            except (KeyError, TypeError, ValueError):
+                z = math.nan
+            const_prediction = (
+                model.fallback_offset - z
+                if math.isfinite(z)
+                else model.fallback_offset
+            )
+            predictions["const_offset"].append(const_prediction)
+            predictions["zeros"].append(0.0)
+    metrics = {name: _metrics(actual, values) for name, values in predictions.items()}
+    candidate = metrics["offset_trend"]
+    deltas = {
+        baseline: {
+            "rmse": candidate["rmse"] - metrics[baseline]["rmse"],
+            "mae": candidate["mae"] - metrics[baseline]["mae"],
+        }
+        for baseline in ("zeros", "const_offset")
+    }
+    passed = all(
+        delta["rmse"] < 0 and delta["mae"] < 0 for delta in deltas.values()
+    )
+    return {
+        "stage": stage,
+        "fold": PSEUDO_BLIND_FOLD,
+        "folds": PSEUDO_BLIND_FOLDS,
+        "heel_fraction": heel_fraction,
+        "wells": len(selected),
+        "well_ids": selected,
+        "metrics": metrics,
+        "deltas": deltas,
+        "passed": passed,
+    }
+
+
+def evaluate_toe_gate(train_dir: str | Path) -> dict:
+    """Run the mandatory toe-holdout screen before the full confirmation."""
+    stages = []
+    for stage in ("screen", "confirm"):
+        result = evaluate_toe_holdout(train_dir, stage=stage)
+        stages.append(result)
+        if not result["passed"]:
+            break
+    return {"promoted": len(stages) == 2 and stages[-1]["passed"], "stages": stages}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="ROGII local KPI and submission utility")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -251,6 +333,11 @@ def main() -> None:
     )
     blind.add_argument("--train-dir", type=Path, default=Path("data/raw/train"))
     blind.add_argument("--stage", choices=("screen", "confirm"), default="screen")
+    toe = subparsers.add_parser(
+        "toe-holdout", help="evaluate offset-trend suffix extrapolation"
+    )
+    toe.add_argument("--train-dir", type=Path, default=Path("data/raw/train"))
+    toe.add_argument("--stage", choices=("screen", "confirm"), default="screen")
     submission = subparsers.add_parser("submission", help="create a format-smoke submission")
     submission.add_argument("--sample", type=Path, default=Path("data/raw/sample_submission.csv"))
     submission.add_argument("--output", type=Path, default=Path("submission.csv"))
@@ -260,6 +347,8 @@ def main() -> None:
         print(json.dumps(evaluate_baseline(args.train_dir, args.folds, args.fold), indent=2))
     elif args.command == "pseudo-blind":
         print(json.dumps(evaluate_pseudo_blind(args.train_dir, stage=args.stage), indent=2))
+    elif args.command == "toe-holdout":
+        print(json.dumps(evaluate_toe_holdout(args.train_dir, stage=args.stage), indent=2))
     else:
         targets = load_submission_targets(args.sample)
         predictions = {target.id: args.constant for target in targets}

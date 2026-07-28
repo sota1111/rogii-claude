@@ -1,10 +1,12 @@
 {
-  "predictor": "TVT_input",
-  "method": "pass_through_baseline",
-  "metric": "rmse",
-  "local_score": 0.0,
-  "gate": "screen",
-  "decision": "retained",
-  "evaluated_at": "2026-07-26",
-  "issue": "SOT-1973"
+  "predictor": "offset_trend_toe_extrapolation",
+  "method": "linear_offset_by_md",
+  "metric": "toe_holdout_rmse",
+  "local_score": 82.6643896750121,
+  "local_mae": 54.37182677134558,
+  "gate": "screen_and_confirm",
+  "decision": "promoted",
+  "heel_fraction": 0.2637739971905728,
+  "evaluated_at": "2026-07-28",
+  "issue": "SOT-2092"
 }
