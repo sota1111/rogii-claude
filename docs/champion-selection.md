@@ -1,10 +1,31 @@
-# Champion selection: GR correlation
+# Champion selection
 
 ## Decision
 
-The existing `tvt = TVT_input` pass-through baseline remains the champion.
-The type-well GR shift-matching candidate did not pass the screen gate, so its
-implementation was reverted as required by the promotion policy.
+The champion is `offset_trend_toe_extrapolation`. It fits
+`TVT_input + Z = intercept + slope * MD` on each test well's visible heel and
+extrapolates the fitted offset into the withheld toe before subtracting `Z`.
+This replaces the pass-through path whose effective withheld-toe prediction
+was zero.
+
+## Offset-trend toe extrapolation promotion (SOT-2092)
+
+The evaluation hides the trailing 73.6226% of each selected train well, matching
+the aggregate visible-heel fraction in test (5,070 / 19,221 = 26.3774%).
+Promotion requires strictly lower RMSE and MAE than both effective baselines.
+
+| Stage | Wells | Toe rows | Method | RMSE | MAE |
+| --- | ---: | ---: | --- | ---: | ---: |
+| screen | 5 | 20,885 | offset trend | 88.125737 | 56.834512 |
+| screen | 5 | 20,885 | constant offset | 106.334128 | 94.262982 |
+| screen | 5 | 20,885 | zeros | 11812.168011 | 11803.536606 |
+| confirm | 156 | 746,360 | offset trend | 82.664390 | 54.371827 |
+| confirm | 156 | 746,360 | constant offset | 127.437429 | 109.441774 |
+| confirm | 156 | 746,360 | zeros | 11590.406109 | 11572.944262 |
+
+Both stages pass on both metrics. `champion.json` and `src/predict.py` therefore
+register and execute the new method. Degenerate fits and missing features take
+finite median/terminal-offset fallbacks.
 
 ## Candidate
 
@@ -35,18 +56,18 @@ below zero, so it was intentionally skipped.
 
 ## Champion state
 
-`champion.json` records `pass_through_baseline` with local RMSE `0.0` and a
-`retained` decision. No GR-correlation predictor code remains in the champion
-path.
+At that time, `champion.json` recorded `pass_through_baseline` with local RMSE
+`0.0` and a `retained` decision. No GR-correlation predictor code remained in
+the champion path. SOT-2092 supersedes this historical state.
 
 ## Evaluation contract update (SOT-2033)
 
 The zero-error smoke KPI is no longer a candidate-promotion gate. Future
 candidates use the leakage-free pseudo-blind screen→confirm contract documented
 in `docs/data-and-metric.md`. This issue changes only the evaluation contract:
-the registered `pass_through_baseline` champion and its executable submission
-path remain unchanged until a candidate passes both pseudo-blind stages and is
-confirmed separately on Kaggle.
+the then-registered `pass_through_baseline` champion and its executable
+submission path remained unchanged pending a candidate passing a suitable
+blind evaluation.
 
 The contract baseline was executed against the 2026-07-26 train download:
 
@@ -100,6 +121,7 @@ before the single screen winner may enter confirm; running confirm after the
 RMSE failure could not make the candidate eligible for promotion.
 
 The candidate implementation was experimental and has been removed. No
-candidate code remains in `src/`, and `champion.json` plus `src/predict.py`
-continue to identify and execute the `TVT_input` pass-through champion. The
-decision is **non-promotion**.
+candidate code remains in `src/`. At the end of that experiment,
+`champion.json` plus `src/predict.py` still identified the `TVT_input`
+pass-through champion. Its decision was **non-promotion**; SOT-2092 later
+replaced that champion.

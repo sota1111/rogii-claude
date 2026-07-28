@@ -32,10 +32,34 @@ python3 -m src.evaluate submission --output submission.csv
 
 The writer requires exactly the sample's ids and preserves sample order.
 Missing, extra, duplicate, malformed, or out-of-range ids fail explicitly.
-This command uses zero as a format-smoke prediction (override with
-`--constant`). Official test rows to be predicted have blank `TVT_input`, so
-that field is not used as a test predictor; it is used only for the train smoke
-KPI below.
+The format-smoke command above uses a configurable constant. The champion
+submission instead fits the visible heel and extrapolates the withheld toe:
+
+```bash
+python3 -m src.predict \
+  --test-dir data/raw/test \
+  --sample data/raw/sample_submission.csv \
+  --output submission.csv
+```
+
+It fits `offset = TVT_input + Z` as a linear function of MD per well and predicts
+`TVT = offset(MD) - Z`. Degenerate fits use median heel offset; missing features
+use finite terminal/median fallbacks.
+
+## Toe-holdout champion gate
+
+The gate retains the first 26.3774% of each train well as heel, matching the
+aggregate real-test heel ratio, and hides the complete trailing suffix:
+
+```bash
+python3 -m src.evaluate toe-holdout --stage screen
+python3 -m src.evaluate toe-holdout --stage confirm
+```
+
+Screen uses the first five sorted fold-0 wells and confirm uses all fold-0
+wells. The candidate must have strictly lower RMSE and MAE than both zero
+predictions and median constant-offset extrapolation at both stages. SOT-2092's
+measurements are recorded in `docs/champion-selection.md`.
 
 ## Leakage-free pseudo-blind evaluation contract
 

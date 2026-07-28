@@ -9,6 +9,8 @@ from src.evaluate import (
     build_blind_well,
     evaluate_gate,
     evaluate_pseudo_blind,
+    evaluate_toe_gate,
+    evaluate_toe_holdout,
     interpolation_baseline,
     pseudo_blind_interval,
 )
@@ -105,3 +107,17 @@ def test_gate_stops_after_failed_screen(tmp_path: Path) -> None:
     assert len(result["stages"]) == 1
     assert result["stages"][0]["passed"] is False
     assert result["stages"][0]["rmse_delta"] > 0
+
+
+def test_toe_holdout_screen_and_confirm_promote_linear_offset(tmp_path: Path) -> None:
+    selected = _selected_wells(tmp_path)
+    screen = evaluate_toe_holdout(tmp_path, stage="screen")
+    confirm = evaluate_toe_holdout(tmp_path, stage="confirm")
+    gate = evaluate_toe_gate(tmp_path)
+    assert screen["well_ids"] == selected[:5]
+    assert confirm["well_ids"] == selected
+    assert screen["metrics"]["offset_trend"]["rmse"] == pytest.approx(0.0)
+    assert screen["deltas"]["zeros"]["rmse"] < 0
+    assert screen["deltas"]["const_offset"]["mae"] < 0
+    assert screen["passed"] is True
+    assert gate["promoted"] is True

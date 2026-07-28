@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import math
+import statistics
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Mapping, Sequence
 
 HORIZONTAL_SUFFIX = "__horizontal_well.csv"
 TYPEWELL_SUFFIX = "__typewell.csv"
@@ -23,6 +25,80 @@ class WellFiles:
     well: str
     horizontal: Path
     typewell: Path
+
+
+@dataclass(frozen=True)
+class OffsetTrend:
+    """A per-well linear model for the TVT + Z vertical offset."""
+
+    intercept: float
+    slope: float
+    fallback_offset: float
+    terminal_offset: float
+
+
+def fit_offset_trend(rows: Sequence[Mapping[str, str]]) -> OffsetTrend:
+    """Fit offset = intercept + slope * MD, falling back to a constant median."""
+    points: list[tuple[float, float]] = []
+    for row in rows:
+        if not row.get("TVT_input") or not row.get("Z"):
+            continue
+        try:
+            md = float(row["MD"])
+            offset = float(row["TVT_input"]) + float(row["Z"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(md) and math.isfinite(offset):
+            points.append((md, offset))
+    if not points:
+        raise ValueError("Cannot fit offset trend without finite heel observations")
+
+    fallback = statistics.median(offset for _, offset in points)
+    mean_md = sum(md for md, _ in points) / len(points)
+    mean_offset = sum(offset for _, offset in points) / len(points)
+    denominator = sum((md - mean_md) ** 2 for md, _ in points)
+    if len(points) < 2 or denominator <= 1e-12:
+        intercept, slope = fallback, 0.0
+    else:
+        slope = (
+            sum(
+                (md - mean_md) * (offset - mean_offset)
+                for md, offset in points
+            )
+            / denominator
+        )
+        intercept = mean_offset - slope * mean_md
+    terminal_md = points[-1][0]
+    terminal_offset = intercept + slope * terminal_md
+    if not all(
+        math.isfinite(value)
+        for value in (intercept, slope, fallback, terminal_offset)
+    ):
+        intercept, slope, terminal_offset = fallback, 0.0, fallback
+    return OffsetTrend(intercept, slope, fallback, terminal_offset)
+
+
+def predict_offset_tvt(model: OffsetTrend, row: Mapping[str, str]) -> float:
+    """Extrapolate TVT from the offset trend, with finite missing-feature fallbacks."""
+    try:
+        md = float(row["MD"]) if row.get("MD") else math.nan
+    except (TypeError, ValueError):
+        md = math.nan
+    offset = (
+        model.intercept + model.slope * md
+        if math.isfinite(md)
+        else model.terminal_offset
+    )
+    if not math.isfinite(offset):
+        offset = model.fallback_offset
+    try:
+        z = float(row["Z"]) if row.get("Z") else math.nan
+    except (TypeError, ValueError):
+        z = math.nan
+    prediction = offset - z if math.isfinite(z) else model.terminal_offset
+    if not math.isfinite(prediction):
+        prediction = model.fallback_offset
+    return prediction
 
 
 def _read_rows(path: Path, required: set[str]) -> list[dict[str, str]]:

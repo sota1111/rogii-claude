@@ -1,16 +1,20 @@
-"""Generate a ROGII submission from the registered pass-through champion."""
+"""Generate a ROGII submission with the registered offset-trend champion."""
 from __future__ import annotations
 
 import argparse
 import csv
 import math
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.argv[0]).resolve().parents[1]))
+from src.data import OffsetTrend, fit_offset_trend, predict_offset_tvt
 
 HORIZONTAL_SUFFIX = "__horizontal_well.csv"
 
 
 def generate_submission(test_dir: Path, sample_path: Path, output_path: Path) -> int:
-    """Write TVT_input predictions in the sample submission's exact row order."""
+    """Fit each well's heel and extrapolate its withheld toe in sample order."""
     with sample_path.open(newline="", encoding="utf-8-sig") as handle:
         sample = csv.DictReader(handle)
         if sample.fieldnames != ["id", "tvt"]:
@@ -20,6 +24,7 @@ def generate_submission(test_dir: Path, sample_path: Path, output_path: Path) ->
         targets = list(sample)
 
     rows_by_well: dict[str, list[dict[str, str]]] = {}
+    models: dict[str, OffsetTrend] = {}
     output_rows: list[tuple[str, str]] = []
     for target in targets:
         target_id = target["id"]
@@ -35,13 +40,11 @@ def generate_submission(test_dir: Path, sample_path: Path, output_path: Path) ->
                 if "TVT_input" not in (horizontal.fieldnames or ()):
                     raise ValueError(f"{horizontal_path} is missing TVT_input")
                 rows_by_well[well] = list(horizontal)
+                models[well] = fit_offset_trend(rows_by_well[well])
         rows = rows_by_well[well]
         if not 0 <= index < len(rows):
             raise IndexError(f"{target_id}: row {index} is outside {len(rows)} rows")
-        # Kaggle withholds TVT_input in the suffix represented by the sample.
-        # The retained baseline's defined fallback is the sample's 0.0 value.
-        raw_prediction = rows[index]["TVT_input"] or target["tvt"]
-        prediction = float(raw_prediction)
+        prediction = predict_offset_tvt(models[well], rows[index])
         if not math.isfinite(prediction):
             raise ValueError(f"{target_id}: TVT_input is not finite")
         output_rows.append((target_id, f"{prediction:.10f}"))
@@ -56,7 +59,7 @@ def generate_submission(test_dir: Path, sample_path: Path, output_path: Path) ->
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate submission.csv with the registered TVT_input champion"
+        description="Generate submission.csv with the registered offset-trend champion"
     )
     parser.add_argument("--test-dir", type=Path, required=True)
     parser.add_argument("--sample", type=Path, required=True)
