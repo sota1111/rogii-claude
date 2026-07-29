@@ -58,6 +58,11 @@ class KernelExecCompatibilityTest(unittest.TestCase):
             self.assertTrue(values)
             self.assertTrue(all(math.isfinite(value) for value in values))
             self.assertTrue(any(value != 0.0 for value in values))
+            with kernel_out.open(encoding="utf-8") as handle:
+                next(handle)
+                self.assertTrue(
+                    all(len(line.rstrip().rsplit(".", 1)[-1]) == 7 for line in handle)
+                )
 
 
 if __name__ == "__main__":

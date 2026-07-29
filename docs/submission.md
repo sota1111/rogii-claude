@@ -72,3 +72,26 @@ SOT-2093 wired it end-to-end for real scoring:
 This is a promotion confirmed by external scoring: the offset-trend champion
 improves both the public RMSE (`11551.955 → 62.332`) and the rank
 (`5766 → 5447`) over the zero-fallback baseline it replaced.
+
+## Cycle 4 result (SOT-2156 / SOT-2158)
+
+Cycle 4 promoted the exponential recency-weighted offset-trend champion with
+`recency_decay=8`. Its confirm holdout metrics were RMSE `43.292298` and MAE
+`29.559006`. The Theil–Sen alternative evaluated in SOT-2157 did not pass the
+screen gate, so it was not promoted.
+
+SOT-2158 regenerated all 14,151 predictions and pushed the updated standard
+library-only kernel. Python 3.11 and Kaggle Python 3.12 differed at the final
+binary floating-point rounding bit when serializing ten decimals, so both
+generators now serialize seven decimals. This changes predictions by less than
+`5e-8` while making the executed Kaggle output byte-identical to the local
+artifact:
+
+- SHA-256: `d0ec1fc356507cd97bcb7d6e300f2cfc00266ab6c8b6ba0dce571fdc72e99ed6`.
+- Kernel: `sota1111/rogii-claude-baseline`, version 5, status `COMPLETE`.
+- Submission reference: `55075600`, status `COMPLETE`.
+- Public score: **44.456** (improved from cycle 3's `62.332`).
+- Public leaderboard rank at verification time: **5465 / 5885**.
+- Submitted at: `2026-07-29 07:51:32 UTC`.
+
+The real Kaggle result confirms the recency-weighted cycle-4 promotion.
