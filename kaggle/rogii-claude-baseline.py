@@ -1,4 +1,4 @@
-"""Kaggle Notebook entry point for the cycle-3 offset-trend toe-extrapolation champion.
+"""Kaggle Notebook entry point for the cycle-4 recency-weighted champion.
 
 Self-contained (Python standard library only, no internet). Reproduces the
 ``src.predict``/``src.data`` champion: for each horizontal well it fits the
@@ -170,7 +170,9 @@ def main():
         prediction = predict_offset_tvt(models[well], rows[index])
         if not math.isfinite(prediction):
             raise ValueError(f"{target_id}: prediction is not finite")
-        output_rows.append((target_id, f"{prediction:.10f}"))
+        # Seven decimals keep the serialized artifact stable across Python
+        # runtimes while remaining far below the competition metric precision.
+        output_rows.append((target_id, f"{prediction:.7f}"))
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with OUTPUT_PATH.open("w", newline="", encoding="utf-8") as handle:

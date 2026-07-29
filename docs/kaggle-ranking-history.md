@@ -8,7 +8,11 @@
 | --- | ---: | ---: | ---: |
 | 2026-07-26 13:38 | 5,725 | 5,730 | 11551.955 |
 | 2026-07-28 15:57 | 5,469 | 5,844 | 11551.955 |
+| 2026-07-29 07:52 | 5,465 | 5,885 | 44.456 |
 
-The official rank is shared by the GPT and Claude repositories because both submit under the same Kaggle team. A newer team submission scored 62.332; it is not attributed to this lineage here without retained lineage evidence.
+The official rank is shared by the GPT and Claude repositories because both
+submit under the same Kaggle team. The latest score is attributed to this
+lineage by retained submission ref `55075600` and description
+`SOT-2158 cycle-4 recency-weighted champion`.
 
 Source: Kaggle CLI `competitions list` and `competitions submissions`. Earlier official-rank snapshots were not retained, so they are not reconstructed or estimated.

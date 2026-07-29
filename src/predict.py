@@ -49,7 +49,9 @@ def generate_submission(test_dir: Path, sample_path: Path, output_path: Path) ->
         prediction = predict_offset_tvt(models[well], rows[index])
         if not math.isfinite(prediction):
             raise ValueError(f"{target_id}: TVT_input is not finite")
-        output_rows.append((target_id, f"{prediction:.10f}"))
+        # Seven decimals keep the serialized artifact stable across the local
+        # Python 3.11 and Kaggle Python 3.12 math implementations.
+        output_rows.append((target_id, f"{prediction:.7f}"))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", newline="", encoding="utf-8") as handle:

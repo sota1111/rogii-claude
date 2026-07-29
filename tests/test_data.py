@@ -81,7 +81,7 @@ class DataUtilitiesTest(unittest.TestCase):
         write_csv(sample, ["id", "tvt"], [["abc_1", 0], ["abc_0", 0]])
         self.assertEqual(generate_submission(self.root / "test", sample, output), 2)
         self.assertEqual(
-            output.read_text(), "id,tvt\nabc_1,102.0000000000\nabc_0,101.0000000000\n"
+            output.read_text(), "id,tvt\nabc_1,102.0000000\nabc_0,101.0000000\n"
         )
 
         script = Path(__file__).parents[1] / "src" / "predict.py"
@@ -129,7 +129,7 @@ class DataUtilitiesTest(unittest.TestCase):
         output = self.root / "submission.csv"
         write_csv(sample, ["id", "tvt"], [["abc_2", 0.0]])
         generate_submission(self.root / "test", sample, output)
-        self.assertEqual(output.read_text(), "id,tvt\nabc_2,114.0000000000\n")
+        self.assertEqual(output.read_text(), "id,tvt\nabc_2,114.0000000\n")
 
     def test_offset_trend_constant_and_missing_z_fallbacks_are_finite(self) -> None:
         model = fit_offset_trend(
