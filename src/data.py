@@ -37,8 +37,12 @@ class OffsetTrend:
     terminal_offset: float
 
 
-def fit_offset_trend(rows: Sequence[Mapping[str, str]]) -> OffsetTrend:
-    """Fit offset = intercept + slope * MD, falling back to a constant median."""
+def fit_offset_trend(
+    rows: Sequence[Mapping[str, str]], *, recency_decay: float = 0.0
+) -> OffsetTrend:
+    """Fit offset = intercept + slope * MD with optional exponential recency weights."""
+    if not math.isfinite(recency_decay) or recency_decay < 0.0:
+        raise ValueError("recency_decay must be a finite non-negative number")
     points: list[tuple[float, float]] = []
     for row in rows:
         if not row.get("TVT_input") or not row.get("Z"):
@@ -54,16 +58,27 @@ def fit_offset_trend(rows: Sequence[Mapping[str, str]]) -> OffsetTrend:
         raise ValueError("Cannot fit offset trend without finite heel observations")
 
     fallback = statistics.median(offset for _, offset in points)
-    mean_md = sum(md for md, _ in points) / len(points)
-    mean_offset = sum(offset for _, offset in points) / len(points)
-    denominator = sum((md - mean_md) ** 2 for md, _ in points)
+    weights = [
+        math.exp(recency_decay * (index - len(points) + 1) / max(1, len(points) - 1))
+        for index in range(len(points))
+    ]
+    weight_sum = sum(weights)
+    mean_md = sum(weight * md for weight, (md, _) in zip(weights, points)) / weight_sum
+    mean_offset = (
+        sum(weight * offset for weight, (_, offset) in zip(weights, points))
+        / weight_sum
+    )
+    denominator = sum(
+        weight * (md - mean_md) ** 2
+        for weight, (md, _) in zip(weights, points)
+    )
     if len(points) < 2 or denominator <= 1e-12:
         intercept, slope = fallback, 0.0
     else:
         slope = (
             sum(
-                (md - mean_md) * (offset - mean_offset)
-                for md, offset in points
+                weight * (md - mean_md) * (offset - mean_offset)
+                for weight, (md, offset) in zip(weights, points)
             )
             / denominator
         )

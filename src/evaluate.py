@@ -26,6 +26,7 @@ SCREEN_WELLS = 5
 MAX_RMSE_REGRESSION = 0.0
 MAX_MAE_REGRESSION = 0.0
 TEST_HEEL_FRACTION = 5070 / 19221
+LOCAL_OFFSET_RECENCY_DECAY = 8.0
 
 
 @dataclass(frozen=True)
@@ -258,7 +259,8 @@ def evaluate_toe_holdout(
         selected = selected[:SCREEN_WELLS]
     actual: list[float] = []
     predictions: dict[str, list[float]] = {
-        "offset_trend": [],
+        "local_offset_trend": [],
+        "global_offset_trend": [],
         "const_offset": [],
         "zeros": [],
     }
@@ -267,32 +269,40 @@ def evaluate_toe_holdout(
             continue
         rows = load_horizontal(files.horizontal, require_target=True)
         heel_count = max(1, min(len(rows) - 1, round(len(rows) * heel_fraction)))
-        model = fit_offset_trend(rows[:heel_count])
+        global_model = fit_offset_trend(rows[:heel_count])
+        local_model = fit_offset_trend(
+            rows[:heel_count], recency_decay=LOCAL_OFFSET_RECENCY_DECAY
+        )
         for row in rows[heel_count:]:
             if not row.get("TVT"):
                 continue
             truth = float(row["TVT"])
             actual.append(truth)
-            predictions["offset_trend"].append(predict_offset_tvt(model, row))
+            predictions["local_offset_trend"].append(
+                predict_offset_tvt(local_model, row)
+            )
+            predictions["global_offset_trend"].append(
+                predict_offset_tvt(global_model, row)
+            )
             try:
                 z = float(row["Z"])
             except (KeyError, TypeError, ValueError):
                 z = math.nan
             const_prediction = (
-                model.fallback_offset - z
+                global_model.fallback_offset - z
                 if math.isfinite(z)
-                else model.fallback_offset
+                else global_model.fallback_offset
             )
             predictions["const_offset"].append(const_prediction)
             predictions["zeros"].append(0.0)
     metrics = {name: _metrics(actual, values) for name, values in predictions.items()}
-    candidate = metrics["offset_trend"]
+    candidate = metrics["local_offset_trend"]
     deltas = {
         baseline: {
             "rmse": candidate["rmse"] - metrics[baseline]["rmse"],
             "mae": candidate["mae"] - metrics[baseline]["mae"],
         }
-        for baseline in ("zeros", "const_offset")
+        for baseline in ("global_offset_trend", "zeros", "const_offset")
     }
     passed = all(
         delta["rmse"] < 0 and delta["mae"] < 0 for delta in deltas.values()

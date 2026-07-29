@@ -2,11 +2,29 @@
 
 ## Decision
 
-The champion is `offset_trend_toe_extrapolation`. It fits
-`TVT_input + Z = intercept + slope * MD` on each test well's visible heel and
+The champion is `recency_weighted_offset_trend_toe_extrapolation`. It fits
+`TVT_input + Z = intercept + slope * MD` on each test well's visible heel with
+exponentially increasing row-recency weights (`recency_decay=8`), then
 extrapolates the fitted offset into the withheld toe before subtracting `Z`.
-This replaces the pass-through path whose effective withheld-toe prediction
-was zero.
+
+## Recency-weighted local-slope promotion (SOT-2156)
+
+The screen compared pre-fixed decay values `1, 2, 4, 8, 12`; decay 8 had the
+lowest screen RMSE and was frozen before confirm. A zero decay is the prior
+global-OLS champion. Weights increase monotonically toward the toe boundary
+and use row order only, so withheld targets do not influence the fit.
+
+| Stage | Wells | Toe rows | Method | RMSE | MAE |
+| --- | ---: | ---: | --- | ---: | ---: |
+| screen | 5 | 20,885 | recency-weighted (decay 8) | 17.749175 | 12.873673 |
+| screen | 5 | 20,885 | global OLS champion | 88.125737 | 56.834512 |
+| confirm | 156 | 746,360 | recency-weighted (decay 8) | 43.292298 | 29.559006 |
+| confirm | 156 | 746,360 | global OLS champion | 82.664390 | 54.371827 |
+
+The candidate strictly improves both metrics at screen and confirm and is
+promoted. `champion.json` and `src/predict.py` now register and execute the
+recency-weighted model. Median/terminal-offset finite fallbacks remain intact.
+Exec-compatible kernel refresh and Kaggle proof are tracked by SOT-2158.
 
 ## Offset-trend toe extrapolation promotion (SOT-2092)
 
