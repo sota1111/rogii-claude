@@ -40,7 +40,9 @@ def generate_submission(test_dir: Path, sample_path: Path, output_path: Path) ->
                 if "TVT_input" not in (horizontal.fieldnames or ()):
                     raise ValueError(f"{horizontal_path} is missing TVT_input")
                 rows_by_well[well] = list(horizontal)
-                models[well] = fit_offset_trend(rows_by_well[well])
+                models[well] = fit_offset_trend(
+                    rows_by_well[well], recency_decay=8.0
+                )
         rows = rows_by_well[well]
         if not 0 <= index < len(rows):
             raise IndexError(f"{target_id}: row {index} is outside {len(rows)} rows")

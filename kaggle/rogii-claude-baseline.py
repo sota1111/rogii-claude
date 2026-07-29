@@ -34,7 +34,9 @@ class OffsetTrend:
     terminal_offset: float
 
 
-def fit_offset_trend(rows):
+def fit_offset_trend(rows, recency_decay=0.0):
+    if not math.isfinite(recency_decay) or recency_decay < 0.0:
+        raise ValueError("recency_decay must be a finite non-negative number")
     points = []
     for row in rows:
         if not row.get("TVT_input") or not row.get("Z"):
@@ -50,14 +52,28 @@ def fit_offset_trend(rows):
         raise ValueError("Cannot fit offset trend without finite heel observations")
 
     fallback = statistics.median(offset for _, offset in points)
-    mean_md = sum(md for md, _ in points) / len(points)
-    mean_offset = sum(offset for _, offset in points) / len(points)
-    denominator = sum((md - mean_md) ** 2 for md, _ in points)
+    weights = [
+        math.exp(recency_decay * (index - len(points) + 1) / max(1, len(points) - 1))
+        for index in range(len(points))
+    ]
+    weight_sum = sum(weights)
+    mean_md = sum(weight * md for weight, (md, _) in zip(weights, points)) / weight_sum
+    mean_offset = (
+        sum(weight * offset for weight, (_, offset) in zip(weights, points))
+        / weight_sum
+    )
+    denominator = sum(
+        weight * (md - mean_md) ** 2
+        for weight, (md, _) in zip(weights, points)
+    )
     if len(points) < 2 or denominator <= 1e-12:
         intercept, slope = fallback, 0.0
     else:
         slope = (
-            sum((md - mean_md) * (offset - mean_offset) for md, offset in points)
+            sum(
+                weight * (md - mean_md) * (offset - mean_offset)
+                for weight, (md, offset) in zip(weights, points)
+            )
             / denominator
         )
         intercept = mean_offset - slope * mean_md
@@ -111,9 +127,7 @@ def _index_horizontal_wells(input_dir):
     for path in sorted(input_dir.rglob(f"*{HORIZONTAL_SUFFIX}")):
         well = path.name[: -len(HORIZONTAL_SUFFIX)]
         is_test = any(part.lower() == "test" for part in path.parts)
-        if well not in index:
-            index[well] = (is_test, path)
-        elif is_test and not index[well][0]:
+        if well not in index or (is_test and not index[well][0]):
             index[well] = (is_test, path)
     return {well: path for well, (_, path) in index.items()}
 
@@ -147,7 +161,9 @@ def main():
                 if "TVT_input" not in (horizontal.fieldnames or ()):
                     raise ValueError(f"{horizontal_path} is missing TVT_input")
                 rows_by_well[well] = list(horizontal)
-                models[well] = fit_offset_trend(rows_by_well[well])
+                models[well] = fit_offset_trend(
+                    rows_by_well[well], recency_decay=8.0
+                )
         rows = rows_by_well[well]
         if not 0 <= index < len(rows):
             raise IndexError(f"{target_id}: row {index} is outside {len(rows)} rows")

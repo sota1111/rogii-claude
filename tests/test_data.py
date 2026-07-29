@@ -144,6 +144,20 @@ class DataUtilitiesTest(unittest.TestCase):
             math.isfinite(predict_offset_tvt(model, {"MD": "", "Z": ""}))
         )
 
+    def test_offset_trend_recency_weighting_tracks_the_terminal_slope(self) -> None:
+        rows = [
+            {"MD": "0", "Z": "0", "TVT_input": "0"},
+            {"MD": "1", "Z": "0", "TVT_input": "0"},
+            {"MD": "2", "Z": "0", "TVT_input": "10"},
+            {"MD": "3", "Z": "0", "TVT_input": "20"},
+        ]
+        global_model = fit_offset_trend(rows)
+        local_model = fit_offset_trend(rows, recency_decay=8.0)
+        self.assertGreater(local_model.slope, global_model.slope)
+        self.assertTrue(math.isfinite(local_model.terminal_offset))
+        with self.assertRaisesRegex(ValueError, "recency_decay"):
+            fit_offset_trend(rows, recency_decay=-1.0)
+
     def test_rmse_and_deterministic_holdout_evaluation(self) -> None:
         score, count = rmse([(1, 2), (3, 3)])
         self.assertAlmostEqual(score, 2 ** -0.5)
