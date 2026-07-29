@@ -1,5 +1,30 @@
 # Champion selection
 
+## Theil–Sen robust-slope non-promotion (SOT-2157)
+
+The candidate replaced the offset-trend slope with the median of pairwise
+slopes and used `median(offset - slope * MD)` as its intercept. For large
+wells, 20,000 index pairs were selected with a fixed seed before any toe
+targets were read, keeping the experiment deterministic and leakage-free.
+
+The issue originally named the SOT-2092 global-OLS model as champion, but
+SOT-2156 had already promoted the recency-weighted model on `main`. The
+mandatory screen therefore compared Theil–Sen with the effective champion.
+
+| Stage | Wells | Toe rows | Method | RMSE | MAE |
+| --- | ---: | ---: | --- | ---: | ---: |
+| screen | 5 | 20,885 | Theil–Sen | 75.338282 | 48.602398 |
+| screen | 5 | 20,885 | recency-weighted champion | 17.749175 | 12.873673 |
+| screen | 5 | 20,885 | global OLS (historical) | 88.125737 | 56.834512 |
+| confirm | — | — | — | — | — |
+
+Theil–Sen improved both metrics relative to historical global OLS, but
+regressed against the effective champion by 57.589106 RMSE and 35.728725 MAE.
+It therefore failed the mandatory screen gate, and confirm was not run.
+Candidate code was removed. `champion.json` and `src/predict.py` remain on the
+SOT-2156 recency-weighted champion, so no kernel refresh or Kaggle submission
+handoff is required.
+
 ## Decision
 
 The champion is `recency_weighted_offset_trend_toe_extrapolation`. It fits
