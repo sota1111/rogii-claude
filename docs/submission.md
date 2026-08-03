@@ -153,3 +153,31 @@ gap to the reference kernel requires porting its ML stacking + blend +
 gold-calibration layers — a large-model / retraining change forbidden this close
 to the deadline. Logged in `docs/ai/experiment_ledger.jsonl` as the next-rung
 escalation candidate for a future (post-deadline / non-converge) cycle.
+
+## Cycle 2 (new registry, SOT-2375) — converge-mode re-confirmation (no new artifact)
+
+Still **converge mode** (deadline `2026-08-05T23:59:00Z`, ~2 days out;
+`design/README.md` §51): no new improvement axes, no risky large changes.
+
+**Decomposition judgment: not needed.** Cycle 1 (SOT-2370) already finalized the
+champion, and the only catalogued next-rung escalation — porting the reference
+kernel's ML stacking + blend + gold-calibration to close the `8.752 → 7.872`
+gap — is already recorded as **rejected in converge mode** in
+`docs/ai/experiment_ledger.jsonl`. Retrying a rejected axis without new evidence
+is forbidden, and converge mode forbids opening a new large-model / retraining
+axis this close to the deadline. There is therefore no promotable axis to
+decompose into child issues this cycle.
+
+**Final submission champion = unchanged**: the cycle-5 likelihood-weighted
+particle-filter fallback (`champion.json`, kernel v7, submission ref `55214209`,
+public LB **8.752**, rank `5,465 → 3,231`), with the guarded contact-override
+layer retained above it for the visible wells (risk diversification).
+
+**No new artifact this cycle → non-promotion.** `champion.json` is unchanged
+since cycle 5. The submission gate
+(`scripts/ai/kaggle_targets_submit.sh --competition rogii --repo rogii-claude`,
+dry run) reports `skip (repeat requires a new artifact fingerprint; selected
+artifact was already submitted)` — the current `submission.csv` fingerprint
+byte-matches the already-submitted ref `55214209`. Per SOT-2375 step 3 this is
+recorded as **non-promotion / no new artifact**, not a submission success; the
+cron and child issues do not submit either.
