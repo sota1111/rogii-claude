@@ -181,3 +181,42 @@ artifact was already submitted)` — the current `submission.csv` fingerprint
 byte-matches the already-submitted ref `55214209`. Per SOT-2375 step 3 this is
 recorded as **non-promotion / no new artifact**, not a submission success; the
 cron and child issues do not submit either.
+
+## Cycle 3 (new registry, SOT-2387) — converge-mode re-confirmation (no new artifact)
+
+Still **converge mode** (deadline `2026-08-05T23:59:00Z`, ~2 days out;
+`design/README.md` §51): finalize the verified candidate, do not open new
+improvement axes, and do not start risky large-model / retraining changes.
+
+**Decomposition judgment: not needed.** This is the third consecutive
+converge-mode re-confirmation. The champion was finalized in cycle 1 (SOT-2370)
+and re-confirmed in cycle 2 (SOT-2375); nothing about the state has changed:
+
+- `champion.json` is unchanged since cycle 5 (guarded contact-override →
+  likelihood-weighted particle-filter fallback → offset-trend).
+- The only catalogued next-rung escalation — porting the reference kernel's
+  (`evgendvorkin/rogii-physics-lb-7-872-v48`) ML stacking + blend +
+  gold-calibration layers to close the `8.752 → 7.872` gap — is a large-model /
+  retraining change and is already recorded as **rejected in converge mode** in
+  `docs/ai/experiment_ledger.jsonl`. Retrying a rejected axis without new
+  evidence is forbidden, and converge mode forbids opening it this close to the
+  deadline.
+- **Web investigation (this cycle):** searched the competition's public
+  solutions for a low-risk, portable win over the current champion. The best
+  public approach found (a DWT-based kernel, ~`9.251`) is *worse* than the
+  champion's `8.752`; the only stronger published direction is the same ML
+  stacking family, which requires large retraining. No new promotable axis
+  exists.
+
+**Final submission champion = unchanged**: the cycle-5 likelihood-weighted
+particle-filter fallback (`champion.json`, kernel v7, submission ref `55214209`,
+public LB **8.752**, rank `5,465 → 3,231`), with the guarded contact-override
+layer retained above it for the visible wells (risk diversification).
+
+**No new artifact this cycle → non-promotion.** The submission gate
+(`scripts/ai/kaggle_targets_submit.sh --competition rogii --repo rogii-claude`,
+dry run) reports `skip (repeat requires a new artifact fingerprint; selected
+artifact was already submitted today)` — the current `submission.csv`
+fingerprint byte-matches the already-submitted ref `55214209`. Per SOT-2387
+step 3 this is recorded as **non-promotion / no new artifact**, not a submission
+success; the cron and child issues do not submit either.
