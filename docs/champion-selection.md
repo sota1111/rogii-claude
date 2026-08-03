@@ -1,5 +1,38 @@
 # Champion selection
 
+## Particle-filter fallback promotion (cycle 5, 2026-08-03)
+
+The contact override below reconstructs the three **visible** test wells nearly
+perfectly, yet the submission still scored the offset trend's `44.456` — the
+same value as the pure offset-trend cycle-4 champion. Kaggle rescoring swaps in
+a hidden test set whose wells have no same-id train copy, so the contact
+override never fires there and the *fallback* is what the leaderboard actually
+measures. Improving the fallback is therefore the only lever on the real score.
+
+The particle filter from the same public kernel
+([`evgendvorkin/rogii-physics-lb-7-872-v48`](https://www.kaggle.com/code/evgendvorkin/rogii-physics-lb-7-872-v48))
+was ported to numpy (`src/physics.py`, mirrored in the kernel). For each well a
+32-seed, 400-particle likelihood-weighted ensemble tracks the stratigraphic
+level `U = TVT + Z` through the withheld toe by matching the horizontal GR log
+against the typewell GR-vs-TVT signature, then a robust IRLS degree-3 polynomial
+smooths the trajectory. It replaces the recency-weighted offset trend in the
+fallback position (after the contact override, before the offset trend, which is
+kept for wells with a degenerate typewell).
+
+Measured on the mandatory toe-holdout gate (first 26.3774% of each train well
+kept as heel, complete trailing suffix hidden) against the effective champion:
+
+| Stage | Wells | Toe rows | Particle filter RMSE | Offset-trend champion RMSE |
+| --- | ---: | ---: | ---: | ---: |
+| screen | 5 | 20,885 | 8.297 | 17.749 |
+| confirm | 156 | 746,360 | 11.225 | 43.292 |
+
+The candidate strictly improves the pooled RMSE and MAE at both stages (MAE
+`4.830` vs `12.874` at screen; `6.638` vs `29.559` at confirm) and passes the
+gate on 138 of 156 confirm wells. It is promoted. `src/physics.py` and the
+kernel run the same PCG64 seed stream, so the two generators are byte-identical
+on one platform (`tests/test_physics.py::…matches_kernel_implementation`).
+
 ## Guarded contact-override promotion (cycle 5, 2026-08-03)
 
 Ported from the public physics kernel
