@@ -1,4 +1,4 @@
-"""Generate a ROGII submission with the guarded contact-override champion."""
+"""Generate a ROGII submission with the contact-override + particle-filter champion."""
 from __future__ import annotations
 
 import argparse
@@ -10,6 +10,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(sys.argv[0]).resolve().parents[1]))
 from src.contact import ContactCurve, best_contact_curve
 from src.data import OffsetTrend, fit_offset_trend, predict_offset_tvt
+
+try:
+    from src.physics import predict_pf_well
+except ImportError:  # numpy unavailable: offset-trend fallback only
+    predict_pf_well = None
 
 HORIZONTAL_SUFFIX = "__horizontal_well.csv"
 TYPEWELL_SUFFIX = "__typewell.csv"
@@ -35,13 +40,27 @@ def _load_contact_curve(
     )
 
 
+def _run_particle_filter(test_dir: Path, well: str, test_rows: list[dict[str, str]]):
+    """Full-well PF trajectory, or None so the caller uses the offset trend."""
+    if predict_pf_well is None:
+        return None
+    typewell_path = test_dir / f"{well}{TYPEWELL_SUFFIX}"
+    if not typewell_path.is_file():
+        return None
+    try:
+        return predict_pf_well(test_rows, _read_rows(typewell_path))
+    except Exception as error:
+        print(f"particle filter skipped for {well}: {error}")
+        return None
+
+
 def generate_submission(
     test_dir: Path,
     sample_path: Path,
     output_path: Path,
     train_dir: Path | None = None,
 ) -> int:
-    """Predict each well via guarded contact override, offset trend otherwise."""
+    """Contact override where gated, particle filter next, offset trend last."""
     with sample_path.open(newline="", encoding="utf-8-sig") as handle:
         sample = csv.DictReader(handle)
         if sample.fieldnames != ["id", "tvt"]:
@@ -53,6 +72,7 @@ def generate_submission(
     rows_by_well: dict[str, list[dict[str, str]]] = {}
     models: dict[str, OffsetTrend] = {}
     curves: dict[str, ContactCurve | None] = {}
+    pf_by_well: dict[str, object] = {}
     output_rows: list[tuple[str, str]] = []
     for target in targets:
         target_id = target["id"]
@@ -71,8 +91,15 @@ def generate_submission(
                 models[well] = fit_offset_trend(
                     rows_by_well[well], recency_decay=8.0
                 )
-                curves[well] = _load_contact_curve(
-                    train_dir, well, rows_by_well[well]
+                curve = _load_contact_curve(train_dir, well, rows_by_well[well])
+                curves[well] = curve
+                # The contact override, when it fires, covers the whole well, so
+                # only pay for the particle filter where the override is absent
+                # (the hidden-test path, where no same-well train copy exists).
+                pf_by_well[well] = (
+                    None
+                    if curve is not None
+                    else _run_particle_filter(test_dir, well, rows_by_well[well])
                 )
         rows = rows_by_well[well]
         if not 0 <= index < len(rows):
@@ -82,8 +109,11 @@ def generate_submission(
             md = float(rows[index]["MD"])
         except (KeyError, TypeError, ValueError):
             md = math.nan
+        pf = pf_by_well[well]
         if curve is not None and curve.covers(md):
             prediction = curve.predict(md)
+        elif pf is not None and math.isfinite(pf[index]):
+            prediction = float(pf[index])
         else:
             prediction = predict_offset_tvt(models[well], rows[index])
         if not math.isfinite(prediction):

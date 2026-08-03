@@ -43,13 +43,24 @@ python3 -m src.predict \
   --output submission.csv
 ```
 
-Wells whose same-id train copy reconstructs the trajectory from a formation
-contact (`TVT = ref_tvt - (Z - formation) + offset`, `src/contact.py`) within
-1.0 ft prefix RMSE are predicted by that reconstruction. All other rows fall
-back to the offset trend: it fits `offset = TVT_input + Z` as a linear function
-of MD per well and predicts `TVT = offset(MD) - Z`. Degenerate fits use median
-heel offset; missing features use finite terminal/median fallbacks. Omitting
-`--train-dir` disables the override entirely (fallback-only output).
+Predictions resolve per well by the first applicable layer:
+
+1. **Guarded contact override** (`src/contact.py`) — wells whose same-id train
+   copy reconstructs the trajectory from a formation contact
+   (`TVT = ref_tvt - (Z - formation) + offset`) within 1.0 ft prefix RMSE.
+2. **Particle filter** (`src/physics.py`, requires numpy) — for wells with no
+   compatible train copy, a likelihood-weighted particle-filter ensemble tracks
+   `U = TVT + Z` against the typewell GR signature, then a robust IRLS
+   polynomial smooths the trajectory. This is the layer the hidden-test
+   leaderboard actually scores.
+3. **Offset trend** (`src/data.py`) — the recency-weighted linear fit
+   `offset = TVT_input + Z` over MD, predicting `TVT = offset(MD) - Z`;
+   degenerate fits use median heel offset. Used whenever the particle filter
+   cannot run.
+
+Omitting `--train-dir` disables the contact override (wells then take the
+particle filter / offset trend). Without numpy the particle filter is skipped
+and only the contact override and offset trend run.
 
 ## Toe-holdout champion gate
 
