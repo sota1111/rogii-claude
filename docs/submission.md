@@ -95,3 +95,30 @@ artifact:
 - Submitted at: `2026-07-29 07:51:32 UTC`.
 
 The real Kaggle result confirms the recency-weighted cycle-4 promotion.
+
+## Cycle 5 result (contact override + particle filter, 2026-08-03)
+
+Ported from the public physics kernel
+[`evgendvorkin/rogii-physics-lb-7-872-v48`](https://www.kaggle.com/code/evgendvorkin/rogii-physics-lb-7-872-v48).
+Two submissions this cycle:
+
+1. **Guarded contact override** (kernel v6, ref `55212063`). Reconstructs the
+   three visible test wells to ~0.01 ft prefix RMSE, but scored **44.456** —
+   identical to the cycle-4 offset trend. Diagnosis: Kaggle rescoring uses a
+   hidden test set whose wells have no same-id train copy, so the override
+   never fires there and the fallback is what the leaderboard measures.
+2. **Particle-filter fallback** (kernel v7, ref `55214209`). Replaces the
+   offset trend on hidden wells with a likelihood-weighted particle-filter
+   ensemble (see `docs/champion-selection.md`). Toe-holdout confirm RMSE
+   **11.225** vs the offset trend's **43.292** over 156 wells. Public score
+   **8.752** (down from `44.456`); official team rank `5,465 → 3,231`. This is
+   the external confirmation that the fallback path is what the hidden-test
+   leaderboard scores, and that the particle filter is a real improvement over
+   the offset trend. The remaining gap to the reference kernel's `7.872` is its
+   ML stacking + blend + gold-calibration layers, which were not ported.
+
+Both kernels keep the editor-run (visible-well) `submission.csv` byte-identical
+because the visible wells resolve through the contact override in either case;
+the particle filter only changes the hidden-test predictions the leaderboard
+scores. Kernel v7 status `COMPLETE`; the executed Kaggle output byte-matches the
+committed artifact on the visible wells.
