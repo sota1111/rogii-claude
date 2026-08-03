@@ -122,3 +122,34 @@ because the visible wells resolve through the contact override in either case;
 the particle filter only changes the hidden-test predictions the leaderboard
 scores. Kernel v7 status `COMPLETE`; the executed Kaggle output byte-matches the
 committed artifact on the visible wells.
+
+## Cycle 1 (new registry, SOT-2370) — converge-mode finalization
+
+Deadline `2026-08-05T23:59:00Z` (~2 days out) put this cycle in **converge mode**
+(`design/README.md` §51): no new improvement axes, no risky large changes;
+finalize verified candidates and select the final submission with recorded
+reasoning.
+
+**Final submission champion = the cycle-5 likelihood-weighted particle-filter
+fallback** (`champion.json`, kernel v7, submission ref `55214209`):
+
+- Verified: toe-holdout confirm RMSE **11.225** vs the offset trend's **43.292**
+  over 156 wells; externally confirmed public LB **8.752** (rank `5,465 → 3,231`).
+  It is the best-ever result for this lineage and the hidden-test path the
+  leaderboard actually scores.
+- Risk diversification note: the guarded contact-override layer (ref `55212063`,
+  LB `44.456`) is retained above the PF fallback for the visible wells, so the
+  editor-run artifact stays byte-identical; only the hidden-test predictions —
+  which the leaderboard scores — resolve through the particle filter.
+
+**No new artifact this cycle.** `champion.json` is unchanged since cycle 5 and
+the submitted kernel v7 already carries this champion, so re-submitting would be
+byte-identical → recorded as **non-promotion / no new artifact** (per SOT-2370
+step 3), not a submission success. The cron and this cycle therefore do not
+re-submit.
+
+**Deferred (rejected in converge mode):** closing the remaining `8.752 → 7.872`
+gap to the reference kernel requires porting its ML stacking + blend +
+gold-calibration layers — a large-model / retraining change forbidden this close
+to the deadline. Logged in `docs/ai/experiment_ledger.jsonl` as the next-rung
+escalation candidate for a future (post-deadline / non-converge) cycle.
