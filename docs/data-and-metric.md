@@ -33,18 +33,23 @@ python3 -m src.evaluate submission --output submission.csv
 The writer requires exactly the sample's ids and preserves sample order.
 Missing, extra, duplicate, malformed, or out-of-range ids fail explicitly.
 The format-smoke command above uses a configurable constant. The champion
-submission instead fits the visible heel and extrapolates the withheld toe:
+submission applies the guarded contact override with the offset-trend fallback:
 
 ```bash
 python3 -m src.predict \
   --test-dir data/raw/test \
   --sample data/raw/sample_submission.csv \
+  --train-dir data/raw/train \
   --output submission.csv
 ```
 
-It fits `offset = TVT_input + Z` as a linear function of MD per well and predicts
-`TVT = offset(MD) - Z`. Degenerate fits use median heel offset; missing features
-use finite terminal/median fallbacks.
+Wells whose same-id train copy reconstructs the trajectory from a formation
+contact (`TVT = ref_tvt - (Z - formation) + offset`, `src/contact.py`) within
+1.0 ft prefix RMSE are predicted by that reconstruction. All other rows fall
+back to the offset trend: it fits `offset = TVT_input + Z` as a linear function
+of MD per well and predicts `TVT = offset(MD) - Z`. Degenerate fits use median
+heel offset; missing features use finite terminal/median fallbacks. Omitting
+`--train-dir` disables the override entirely (fallback-only output).
 
 ## Toe-holdout champion gate
 

@@ -1,11 +1,12 @@
-"""Kaggle Notebook entry point for the cycle-4 recency-weighted champion.
+"""Kaggle Notebook entry point for the cycle-5 guarded contact-override champion.
 
 Self-contained (Python standard library only, no internet). Reproduces the
-``src.predict``/``src.data`` champion: for each horizontal well it fits the
-vertical offset ``TVT_input + Z`` as a linear trend in MD over the heel rows
-where ``TVT_input`` is known, then extrapolates the withheld toe as
-``tvt = offset(MD) - Z``. Output is byte-identical to the repository's local
-``src/predict.py`` generator, so the same file can be produced either way.
+``src.predict`` champion: wells whose train copy (same well id, full ``TVT``
+truth plus formation-contact columns) reconstructs the trajectory within
+``PREFIX_RMSE_LIMIT`` of the visible ``TVT_input`` prefix are predicted by the
+contact reconstruction ``TVT = ref_tvt - (Z - formation) + offset``; all other
+rows fall back to the cycle-4 recency-weighted offset trend. Output is
+byte-identical to the repository's local ``src/predict.py`` generator.
 
 Kaggle runs this from ``/kaggle/input`` -> ``/kaggle/working``. The two paths may
 be overridden with ``ROGII_INPUT_DIR`` / ``ROGII_OUTPUT`` for local byte-match
@@ -21,6 +22,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HORIZONTAL_SUFFIX = "__horizontal_well.csv"
+TYPEWELL_SUFFIX = "__typewell.csv"
+
+REF_COLS = ("EGFDU", "ASTNU", "ANCC", "ASTNL", "EGFDL", "BUDA")
+MIN_VALID_PHYS_ROWS = 100
+MIN_KNOWN_PREFIX_ROWS = 50
+PREFIX_RMSE_LIMIT = 1.0
 
 INPUT_DIR = Path(os.environ.get("ROGII_INPUT_DIR", "/kaggle/input"))
 OUTPUT_PATH = Path(os.environ.get("ROGII_OUTPUT", "/kaggle/working/submission.csv"))
@@ -109,6 +116,103 @@ def predict_offset_tvt(model, row):
     return prediction
 
 
+@dataclass(frozen=True)
+class ContactCurve:
+    ref_col: str
+    prefix_rmse: float
+    mds: tuple
+    tvts: tuple
+
+    def covers(self, md):
+        return math.isfinite(md) and self.mds[0] <= md <= self.mds[-1]
+
+    def predict(self, md):
+        return _interp(md, self.mds, self.tvts)
+
+
+def _to_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return math.nan
+
+
+def _interp(x, xs, ys):
+    if x <= xs[0]:
+        return ys[0]
+    if x >= xs[-1]:
+        return ys[-1]
+    lo, hi = 0, len(xs) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if xs[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+    span = xs[hi] - xs[lo]
+    if span <= 0.0:
+        return ys[lo]
+    return ys[lo] + (x - xs[lo]) / span * (ys[hi] - ys[lo])
+
+
+def fit_contact_curve(train_horizontal, train_typewell, ref_col):
+    ref_tvts = [
+        _to_float(row.get("TVT"))
+        for row in train_typewell
+        if (row.get("Geology") or "").strip() == ref_col
+    ]
+    ref_tvts = [value for value in ref_tvts if math.isfinite(value)]
+    if not ref_tvts:
+        return None
+    ref_tvt = min(ref_tvts)
+
+    samples = []
+    residuals = []
+    for row in train_horizontal:
+        md = _to_float(row.get("MD"))
+        raw = ref_tvt - (_to_float(row.get("Z")) - _to_float(row.get(ref_col)))
+        if math.isfinite(md) and math.isfinite(raw):
+            samples.append((md, raw))
+            truth = _to_float(row.get("TVT"))
+            if math.isfinite(truth):
+                residuals.append(truth - raw)
+    if len(samples) < MIN_VALID_PHYS_ROWS or not residuals:
+        return None
+    offset = sum(residuals) / len(residuals)
+    samples.sort()
+    return (
+        tuple(md for md, _ in samples),
+        tuple(raw + offset for _, raw in samples),
+    )
+
+
+def best_contact_curve(test_horizontal, train_horizontal, train_typewell):
+    known = []
+    for row in test_horizontal:
+        tvt = _to_float(row.get("TVT_input"))
+        md = _to_float(row.get("MD"))
+        if math.isfinite(tvt) and math.isfinite(md):
+            known.append((md, tvt))
+    best = None
+    for ref_col in REF_COLS:
+        curve = fit_contact_curve(train_horizontal, train_typewell, ref_col)
+        if curve is None:
+            continue
+        mds, tvts = curve
+        comparable = [(md, tvt) for md, tvt in known if mds[0] <= md <= mds[-1]]
+        if len(comparable) < MIN_KNOWN_PREFIX_ROWS:
+            continue
+        squares = [(_interp(md, mds, tvts) - tvt) ** 2 for md, tvt in comparable]
+        rmse = math.sqrt(sum(squares) / len(squares))
+        if not math.isfinite(rmse):
+            continue
+        if best is None or rmse < best.prefix_rmse:
+            best = ContactCurve(ref_col, rmse, mds, tvts)
+    if best is None or best.prefix_rmse > PREFIX_RMSE_LIMIT:
+        return None
+    return best
+
+
 def _find_sample(input_dir):
     samples = list(input_dir.rglob("sample_submission.csv"))
     if len(samples) != 1:
@@ -132,9 +236,42 @@ def _index_horizontal_wells(input_dir):
     return {well: path for well, (_, path) in index.items()}
 
 
+def _index_train_wells(input_dir):
+    """Map each train-split well to its (horizontal, typewell) file pair."""
+    horizontal = {}
+    typewells = {}
+    for path in sorted(input_dir.rglob(f"*{HORIZONTAL_SUFFIX}")):
+        if any(part.lower() == "train" for part in path.parts):
+            horizontal.setdefault(path.name[: -len(HORIZONTAL_SUFFIX)], path)
+    for path in sorted(input_dir.rglob(f"*{TYPEWELL_SUFFIX}")):
+        if any(part.lower() == "train" for part in path.parts):
+            typewells.setdefault(path.name[: -len(TYPEWELL_SUFFIX)], path)
+    return {
+        well: (horizontal[well], typewells[well])
+        for well in horizontal.keys() & typewells.keys()
+    }
+
+
+def _read_rows(path):
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _load_contact_curve(train_index, well, test_rows):
+    pair = train_index.get(well)
+    if pair is None:
+        return None
+    try:
+        return best_contact_curve(test_rows, _read_rows(pair[0]), _read_rows(pair[1]))
+    except Exception as error:  # guarded: any train-copy defect keeps the fallback
+        print(f"contact override skipped for {well}: {error}")
+        return None
+
+
 def main():
     sample_path = _find_sample(INPUT_DIR)
     horizontal_index = _index_horizontal_wells(INPUT_DIR)
+    train_index = _index_train_wells(INPUT_DIR)
 
     with sample_path.open(newline="", encoding="utf-8-sig") as handle:
         sample = csv.DictReader(handle)
@@ -147,6 +284,7 @@ def main():
 
     rows_by_well = {}
     models = {}
+    curves = {}
     output_rows = []
     for target in targets:
         target_id = target["id"]
@@ -164,10 +302,27 @@ def main():
                 models[well] = fit_offset_trend(
                     rows_by_well[well], recency_decay=8.0
                 )
+                curves[well] = _load_contact_curve(
+                    train_index, well, rows_by_well[well]
+                )
+                curve = curves[well]
+                if curve is not None:
+                    print(
+                        f"contact override {well}: ref={curve.ref_col} "
+                        f"prefix_rmse={curve.prefix_rmse:.4f}"
+                    )
         rows = rows_by_well[well]
         if not 0 <= index < len(rows):
             raise IndexError(f"{target_id}: row {index} is outside {len(rows)} rows")
-        prediction = predict_offset_tvt(models[well], rows[index])
+        curve = curves[well]
+        try:
+            md = float(rows[index]["MD"]) if rows[index].get("MD") else math.nan
+        except (TypeError, ValueError):
+            md = math.nan
+        if curve is not None and curve.covers(md):
+            prediction = curve.predict(md)
+        else:
+            prediction = predict_offset_tvt(models[well], rows[index])
         if not math.isfinite(prediction):
             raise ValueError(f"{target_id}: prediction is not finite")
         # Seven decimals keep the serialized artifact stable across Python

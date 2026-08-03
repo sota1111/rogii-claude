@@ -29,7 +29,12 @@ class KernelExecCompatibilityTest(unittest.TestCase):
     def test_kernel_matches_local_generator_byte_for_byte(self) -> None:
         with tempfile.TemporaryDirectory() as workdir:
             local = Path(workdir) / "local.csv"
-            generate_submission(TEST_DIR, SAMPLE, local)
+            generate_submission(
+                TEST_DIR,
+                SAMPLE,
+                local,
+                train_dir=REPO_ROOT / "data" / "raw" / "train",
+            )
 
             # Point the kernel at data/raw (train + test share well ids); it must
             # prefer the test split and reproduce the local file byte-for-byte,

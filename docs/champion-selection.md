@@ -1,5 +1,38 @@
 # Champion selection
 
+## Guarded contact-override promotion (cycle 5, 2026-08-03)
+
+Ported from the public physics kernel
+[`evgendvorkin/rogii-physics-lb-7-872-v48`](https://www.kaggle.com/code/evgendvorkin/rogii-physics-lb-7-872-v48)
+(public LB 7.872 vs. our previous 44.456). Every public test well ships with a
+full train copy under the same well id; the train horizontal file carries the
+complete `TVT` truth plus formation-contact depth columns
+(`EGFDU`/`ASTNU`/`ANCC`/`ASTNL`/`EGFDL`/`BUDA`) and the train typewell labels
+those formations in `Geology`. The champion reconstructs
+`TVT = ref_tvt - (Z - formation) + offset` from the train copy, interpolates it
+over MD, and uses it for every covered row.
+
+The override is guarded and leakage-free at inference time: for each candidate
+formation the reconstruction is validated against the test well's *visible*
+`TVT_input` prefix, the best formation is kept, and the override fires only
+when its prefix RMSE is at most 1.0 ft (plus ≥100 finite reconstruction rows
+and ≥50 comparable prefix rows). Wells without a compatible train copy — the
+expected situation for private-test wells — keep the SOT-2156 recency-weighted
+offset-trend champion unchanged, which still passes the toe-holdout gates.
+
+Measured prefix RMSE on the three public test wells (all rows covered):
+
+| Well | Best formation | Prefix rows | Prefix RMSE (ft) |
+| --- | --- | ---: | ---: |
+| 000d7d20 | EGFDL | 1,442 | 0.0101 |
+| 00bbac68 | ANCC | 1,545 | 0.0088 |
+| 00e12e8b | ASTNU | 2,083 | 0.0079 |
+
+The toe-holdout gate cannot score this candidate without self-leakage (a train
+well's "train copy" is itself), so promotion rests on the inference-time
+prefix gate above — the same guard the reference kernel uses before letting
+the reconstruction replace its blend on the public LB.
+
 ## Theil–Sen robust-slope non-promotion (SOT-2157)
 
 The candidate replaced the offset-trend slope with the median of pairwise

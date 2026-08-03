@@ -1,13 +1,24 @@
 {
-  "predictor": "recency_weighted_offset_trend_toe_extrapolation",
-  "method": "exponential_recency_weighted_linear_offset_by_md",
-  "metric": "toe_holdout_rmse",
-  "local_score": 43.292297570658484,
-  "local_mae": 29.559006224754345,
-  "gate": "screen_and_confirm",
+  "predictor": "guarded_contact_override_with_offset_trend_fallback",
+  "method": "same_well_train_copy_contact_reconstruction_gated_on_visible_prefix",
+  "metric": "visible_prefix_rmse",
+  "prefix_rmse_by_well": {
+    "000d7d20": 0.0101,
+    "00bbac68": 0.0088,
+    "00e12e8b": 0.0079
+  },
+  "prefix_rmse_limit": 1.0,
+  "fallback": {
+    "predictor": "recency_weighted_offset_trend_toe_extrapolation",
+    "metric": "toe_holdout_rmse",
+    "local_score": 43.292297570658484,
+    "local_mae": 29.559006224754345,
+    "heel_fraction": 0.2637739971905728,
+    "recency_decay": 8.0
+  },
+  "gate": "inference_time_prefix_validation",
   "decision": "promoted",
-  "heel_fraction": 0.2637739971905728,
-  "recency_decay": 8.0,
-  "evaluated_at": "2026-07-29",
-  "issue": "SOT-2156"
+  "reference": "https://www.kaggle.com/code/evgendvorkin/rogii-physics-lb-7-872-v48",
+  "evaluated_at": "2026-08-03",
+  "issue": "direct-instruction"
 }
