@@ -36,6 +36,46 @@ The predictor is therefore **not promoted** as a standalone champion replacement
 it is the foundation the stage-2 PF+ML gate blend (SOT-2394) builds on. The
 champion (`champion.json`, `submission.csv`) is unchanged and nothing is submitted.
 
+## Physics × ML gated blend — stage 2 (SOT-2394, 2026-08-04)
+
+Stage 2 of the three-stage port blends the promoted champion likelihood-weighted
+particle filter (`src/physics.py`) with the stage-1 offline ML base predictor
+(`src/ml_predictor.py`) at the **hidden-test fallback** position — where no
+same-well contact override exists. The blend is a single leak-free scalar
+`weight` (the particle filter's share), `TVT_blend = weight·PF + (1−weight)·ML`
+(`src/blend.py`, mirrored verbatim into the kernel under the `BLEND_SHARED_CODE`
+markers; degrades to whichever side is finite so a missing ML predictor recovers
+the pure-PF champion).
+
+**Leak-free weight selection.** `weight` is grid-searched (0.50…1.00, step 0.05)
+on the **fold-1** toe hold-out — disjoint from the fold-0 set the reported gate
+scores — by `scripts/select_blend_weight.py`, and **frozen** as `BLEND_WEIGHT`
+before any fold-0 confirm target is read. On fold-1 (154 wells, 738,137 toe rows)
+the minimum-RMSE share was **0.75** (blend 11.151 vs PF 11.777, ML 16.182).
+
+Measured on the mandatory leak-free fold-0 toe-holdout gate with the frozen
+`weight = 0.75`, `python3 -m src.evaluate toe-holdout --predictor blend`:
+
+| Stage | Wells | Toe rows | Blend RMSE | PF RMSE | ML RMSE | Beats both singles |
+| --- | ---: | ---: | ---: | ---: | ---: | :---: |
+| screen | 5 | 20,885 | 7.379 | 8.297 | 19.463 | yes |
+| confirm | 156 | 746,360 | **11.173** | **11.225** | 17.645 | **yes** |
+
+On the authoritative full confirm set the blend RMSE **11.173** beats
+`min(PF 11.225, ML 17.645)`, i.e. it beats **both** standalone predictors
+(−0.052 vs the PF champion, −6.472 vs ML). The gate criterion (blend confirm RMSE
+< both singles) is met, so the blend is **promoted** as the hidden-test fallback
+layer: `src/predict.py` (and the kernel mirror) now emit
+`blend_trajectories(PF, ML)` where the contact override is absent.
+
+Visible wells keep the guarded contact override untouched, so the local
+editor-run `submission.csv` stays **byte-identical** (the override covers every
+local test row; only the hidden-test trajectory changes). Exec byte-identity
+between `src/` and the kernel is enforced by `tests/test_blend.py` and
+`tests/test_kernel.py`. **Nothing is submitted here** — stage 3 (SOT-2395, gold
+calibration) produces the final blend champion artifact and the parent
+(SOT-2387) owns Kaggle submission.
+
 ## Particle-filter fallback promotion (cycle 5, 2026-08-03)
 
 The contact override below reconstructs the three **visible** test wells nearly

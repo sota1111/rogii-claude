@@ -403,6 +403,89 @@ def evaluate_ml_toe_holdout(
     }
 
 
+def evaluate_blend_toe_holdout(
+    train_dir: str | Path,
+    *,
+    stage: str = "screen",
+    heel_fraction: float = TEST_HEEL_FRACTION,
+    weight: float | None = None,
+) -> dict:
+    """Measure the physics × ML fallback blend on the leak-free toe hold-out (SOT-2394).
+
+    For each fold-0 hold-out well the withheld toe suffix is predicted by the
+    particle filter (``src.physics``), the offline ML base predictor
+    (``src.ml_predictor``), and their gated blend ``weight*PF + (1-weight)*ML``
+    (``src.blend``). Reports the pooled RMSE/MAE of each so the blend can be
+    compared against ``min(PF champion, ML single)``. The blend **promotes** only
+    when its confirm RMSE beats both singles.
+    """
+    from .blend import BLEND_WEIGHT, blend_trajectories
+    from .ml_predictor import predict_ml_well
+    from .physics import predict_pf_well
+
+    if stage not in {"screen", "confirm"}:
+        raise ValueError("stage must be 'screen' or 'confirm'")
+    if not 0.0 < heel_fraction < 1.0:
+        raise ValueError("heel_fraction must be between zero and one")
+    if weight is None:
+        weight = BLEND_WEIGHT
+    selected = sorted(holdout_wells(train_dir, PSEUDO_BLIND_FOLDS, PSEUDO_BLIND_FOLD))
+    if stage == "screen":
+        selected = selected[:SCREEN_WELLS]
+    actual: list[float] = []
+    pf_pred: list[float] = []
+    ml_pred: list[float] = []
+    blend_pred: list[float] = []
+    root = Path(train_dir)
+    for files in discover_wells(train_dir):
+        if files.well not in selected:
+            continue
+        rows = load_horizontal(files.horizontal, require_target=True)
+        typewell = _read_typewell(root / f"{files.well}__typewell.csv")
+        heel_count = max(1, min(len(rows) - 1, round(len(rows) * heel_fraction)))
+        masked = [
+            dict(row, TVT_input=(row["TVT_input"] if i < heel_count else ""))
+            for i, row in enumerate(rows)
+        ]
+        pf = predict_pf_well(masked, typewell)
+        ml = predict_ml_well(masked, typewell)
+        blended = blend_trajectories(pf, ml, weight)
+        for i in range(heel_count, len(rows)):
+            if not rows[i].get("TVT"):
+                continue
+            if not (math.isfinite(pf[i]) and math.isfinite(ml[i])):
+                continue
+            actual.append(float(rows[i]["TVT"]))
+            pf_pred.append(float(pf[i]))
+            ml_pred.append(float(ml[i]))
+            blend_pred.append(float(blended[i]))
+    pf_metrics = _metrics(actual, pf_pred)
+    ml_metrics = _metrics(actual, ml_pred)
+    blend_metrics = _metrics(actual, blend_pred)
+    best_single = min(pf_metrics["rmse"], ml_metrics["rmse"])
+    return {
+        "stage": stage,
+        "predictor": "pf_ml_blend",
+        "weight": weight,
+        "fold": PSEUDO_BLIND_FOLD,
+        "folds": PSEUDO_BLIND_FOLDS,
+        "heel_fraction": heel_fraction,
+        "wells": len(selected),
+        "well_ids": selected,
+        "rmse": blend_metrics["rmse"],
+        "mae": blend_metrics["mae"],
+        "rows": blend_metrics["rows"],
+        "pf_rmse": pf_metrics["rmse"],
+        "ml_rmse": ml_metrics["rmse"],
+        "best_single_rmse": best_single,
+        "rmse_vs_pf": blend_metrics["rmse"] - pf_metrics["rmse"],
+        "rmse_vs_ml": blend_metrics["rmse"] - ml_metrics["rmse"],
+        "beats_pf": blend_metrics["rmse"] < pf_metrics["rmse"],
+        "beats_ml": blend_metrics["rmse"] < ml_metrics["rmse"],
+        "beats_both_singles": blend_metrics["rmse"] < best_single,
+    }
+
+
 def _read_typewell(path: str | Path) -> list[dict[str, str]]:
     import csv
 
@@ -429,9 +512,9 @@ def main() -> None:
     toe.add_argument("--stage", choices=("screen", "confirm"), default="screen")
     toe.add_argument(
         "--predictor",
-        choices=("offset-trend", "ml"),
+        choices=("offset-trend", "ml", "blend"),
         default="offset-trend",
-        help="offset-trend (default) or the offline ML base predictor",
+        help="offset-trend (default), the offline ML base predictor, or the PF×ML blend",
     )
     submission = subparsers.add_parser("submission", help="create a format-smoke submission")
     submission.add_argument("--sample", type=Path, default=Path("data/raw/sample_submission.csv"))
@@ -443,8 +526,11 @@ def main() -> None:
     elif args.command == "pseudo-blind":
         print(json.dumps(evaluate_pseudo_blind(args.train_dir, stage=args.stage), indent=2))
     elif args.command == "toe-holdout":
-        if getattr(args, "predictor", "offset-trend") == "ml":
+        predictor = getattr(args, "predictor", "offset-trend")
+        if predictor == "ml":
             print(json.dumps(evaluate_ml_toe_holdout(args.train_dir, stage=args.stage), indent=2))
+        elif predictor == "blend":
+            print(json.dumps(evaluate_blend_toe_holdout(args.train_dir, stage=args.stage), indent=2))
         else:
             print(json.dumps(evaluate_toe_holdout(args.train_dir, stage=args.stage), indent=2))
     else:
