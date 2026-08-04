@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from src.align import predict_beam_well
 from src.blend import BLEND_WEIGHT, blend_trajectories
 from src.ml_predictor import predict_ml_well
 from src.physics import predict_pf_well
@@ -125,11 +126,13 @@ def _gold_robust_poly_predict(x_known, y_known, x_all, deg):
 
 
 def _gold_candidate_pool(horizontal_rows, typewell_rows, weight=BLEND_WEIGHT):
-    """Portable per-well candidate trajectories {blend, pf, ml, poly}.
+    """Portable per-well candidate trajectories {blend, pf, ml, poly, beam}.
 
     ``blend`` (the stage-2 base) and its two singles come from the particle filter
     and the offline ML predictor; ``poly`` is a robust MD→TVT extrapolation from the
-    known heel. Known heel rows pass through unchanged for every candidate.
+    known heel; ``beam`` is the beam-search + multi-scale NCC GR↔typewell alignment
+    (``predict_beam_well``, SOT-2442). Known heel rows pass through unchanged for
+    every candidate.
     """
     pf = predict_pf_well(horizontal_rows, typewell_rows)
     try:
@@ -143,11 +146,17 @@ def _gold_candidate_pool(horizontal_rows, typewell_rows, weight=BLEND_WEIGHT):
     known = np.isfinite(ktvt)
     poly = _gold_robust_poly_predict(md[known], ktvt[known], md, 2)
     poly = np.where(known, ktvt, poly)
+    try:
+        beam = np.asarray(predict_beam_well(horizontal_rows, typewell_rows), dtype=float)
+    except Exception:
+        beam = poly
+    beam = np.where(np.isfinite(beam), beam, poly)
     return {
         "blend": np.asarray(blend, dtype=float),
         "pf": np.asarray(pf, dtype=float),
         "ml": ml_arr,
         "poly": poly,
+        "beam": beam,
     }
 
 

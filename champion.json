@@ -16,27 +16,36 @@
     {
       "name": "gold_calibrated_physics_ml_blend",
       "when": "no compatible train copy (hidden-test path)",
-      "method": "gold overlay on the stage-2 blend: TVT_blend = weight*PF + (1-weight)*ML, then a per-well visible-prefix self-verified move (src/calibrate.py gold_calibrate_trajectory). Each well backtests candidates {blend,pf,ml,poly} on withheld tails of its own known heel; a conservative gate (min_gain>=1.0 / min_consistency>=0.67 / max_best<=12) turns the evidence into a soft, ramped, clipped move applied only to the hidden toe. PF = numpy likelihood-weighted ensemble, ML = offline distilled GBRT (src/ml_predictor.py); degrades to blend then to whichever side is finite",
+      "method": "gold overlay on the stage-2 blend: TVT_blend = weight*PF + (1-weight)*ML, then a per-well visible-prefix self-verified move (src/calibrate.py gold_calibrate_trajectory). Each well backtests candidates {blend,pf,ml,poly,beam} on withheld tails of its own known heel; a conservative gate (min_gain>=1.0 / min_consistency>=0.67 / max_best<=12) turns the evidence into a soft, ramped, clipped move applied only to the hidden toe. PF = numpy likelihood-weighted ensemble, ML = offline distilled GBRT (src/ml_predictor.py), beam = beam-search + multi-scale NCC GR<->typewell alignment (src/align.py); degrades to blend then to whichever side is finite",
+      "candidate_pool": "{blend, pf, ml, poly, beam}",
+      "beam_candidate": "SOT-2442: +-2-delta beam search (backward-allowed Viterbi) aligning U=TVT+Z to the typewell GR-vs-TVT signature, plus a multi-scale NCC (windows 8/15/25, softmax x3.0) global TVT registration measured leak-free on the known heel. numpy-only, __file__-independent, deterministic (no RNG); averaged over ALIGN_CONFIGS. src/align.py predict_beam_well, byte-identical in the kernel (tests/test_align.py)",
       "blend_weight": 0.75,
       "blend_weight_selection": "grid 0.50..1.00 argmin RMSE on leak-free fold-1 toe-holdout (disjoint from fold-0 confirm), frozen before reading fold-0 targets",
       "gold_profile_provenance": "reference kernel evgendvorkin/rogii-physics-lb-7-872-v48 conservative ROGII_GOLD_* profile (not tuned on our gate); thresholds frozen in src/calibrate.py GOLD_PROFILE",
       "metric": "toe_holdout_rmse",
-      "toe_holdout_confirm_rmse": 11.115,
+      "toe_holdout_confirm_rmse": 11.074,
       "component_blend_confirm_rmse": 11.173,
       "component_pf_confirm_rmse": 11.225,
       "component_ml_confirm_rmse": 17.645,
       "confirm_wells": 156,
       "confirm_rows": 746360,
-      "gold_moved_wells": 36,
+      "gold_moved_wells": 43,
       "beats_blend": true,
       "beats_both_singles": true,
       "n_particles": 400,
       "n_seeds": 32,
-      "issue": "SOT-2395",
+      "issue": "SOT-2442",
       "prior_layer": {
-        "name": "physics_ml_gated_blend",
-        "toe_holdout_confirm_rmse": 11.173,
-        "issue": "SOT-2394"
+        "name": "gold_calibrated_physics_ml_blend_without_beam",
+        "toe_holdout_confirm_rmse": 11.115,
+        "gold_moved_wells": 36,
+        "candidate_pool": "{blend, pf, ml, poly}",
+        "issue": "SOT-2395",
+        "prior_layer": {
+          "name": "physics_ml_gated_blend",
+          "toe_holdout_confirm_rmse": 11.173,
+          "issue": "SOT-2394"
+        }
       }
     },
     {
@@ -51,5 +60,5 @@
   "decision": "promoted",
   "reference": "https://www.kaggle.com/code/evgendvorkin/rogii-physics-lb-7-872-v48",
   "evaluated_at": "2026-08-04",
-  "issue": "SOT-2395"
+  "issue": "SOT-2442"
 }
