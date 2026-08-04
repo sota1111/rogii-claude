@@ -292,3 +292,21 @@ the real artifact is the kernel version.
 The previous champion (kernel v7, ref 55214209, LB **8.752**) remains on the
 leaderboard; Kaggle keeps every submission, so this push cannot regress the
 selected final score. Deadline `2026-08-05T23:59Z`; 3 submissions remaining today.
+
+## Cycle 6 logic-only reference-NB port — SP45 selector rejected (SOT-2421)
+
+The portable, logic-only remainder of the reference notebook was evaluated as
+an SP45-inspired per-well selector over particle-filter likelihood temperature
+and conservative heel hold. The selector thresholds and variant map were copied
+from the reference profile rather than tuned on the confirmation fold.
+
+**Result — not promoted.** Leak-free fold-0 toe-holdout confirm (156 wells /
+746,360 rows) produced candidate gold RMSE **11.541**, worse than the current
+champion threshold **11.115** by **0.426**. Its component metrics were blend
+11.571 and PF 11.131. Per the non-promotion gate, the candidate implementation
+and tests were reverted; `champion.json`, the kernel, and `submission.csv`
+remain unchanged.
+
+The reference notebook's GPU-trained LGBM/CatBoost weights and model-package
+correction are not portable logic and remain outside this child issue. No
+Kaggle submission was made; submission ownership remains with parent SOT-2406.
