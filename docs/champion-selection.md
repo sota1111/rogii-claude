@@ -1,5 +1,41 @@
 # Champion selection
 
+## Offline ML base TVT predictor — stage 1 (SOT-2393, 2026-08-04)
+
+Stage 1 of the three-stage port of the reference kernel's ML stack
+(`evgendvorkin/rogii-physics-lb-7-872-v48`, public LB 7.872). That kernel's ML
+layer depends on external pretrained Kaggle datasets (LightGBM/CatBoost/Ridge
+model packages) that cannot be shipped under this competition's offline
+submission constraint (no internet, stdlib + numpy only, weights committed to the
+repo). We therefore reproduce the *structure* of the ML base layer with a
+predictor trained **offline on the local train wells** and distilled to a
+committed, numpy-only gradient-boosted regression tree (`src/ml_predictor.py`,
+mirrored verbatim into the kernel; distilled trees embedded in `_MODEL_JSON`, read
+by an exec-compatible, `__file__`-independent loader).
+
+Faithful to the reference base layer: the target is the TVT residual from the last
+known heel value, the GBRT corrects on top of the recency-weighted offset-trend
+base prediction, and the features are the portable subset the hidden-test path can
+compute (toe geometry, GR derivatives, the GR-vs-typewell offset family
+`gr - interp(last_tvt + o, tw_tvt, tw_gr)`, and portable base-prediction deltas).
+
+Measured on the mandatory **leak-free** toe-holdout gate (the shipped model is
+trained on the 617 train wells outside the fold-0 evaluation hold-out, so the
+scored wells are unseen), `python3 -m src.evaluate toe-holdout --predictor ml`:
+
+| Stage | Wells | Toe rows | ML base RMSE | Offset-trend RMSE | Champion PF RMSE |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| screen | 5 | 20,885 | 19.463 | 17.749 | 8.297 |
+| confirm | 156 | 746,360 | **17.645** | 43.292 | **11.225** |
+
+On the full confirm set the ML base predictor improves on the offset-trend
+fallback base 2.45× (43.292 → 17.645) but does **not** beat the physics particle
+filter standalone (17.645 vs 11.225): the toe residual left after the offset trend
+is well-specific and needs the per-well GR matching the particle filter performs.
+The predictor is therefore **not promoted** as a standalone champion replacement;
+it is the foundation the stage-2 PF+ML gate blend (SOT-2394) builds on. The
+champion (`champion.json`, `submission.csv`) is unchanged and nothing is submitted.
+
 ## Particle-filter fallback promotion (cycle 5, 2026-08-03)
 
 The contact override below reconstructs the three **visible** test wells nearly
