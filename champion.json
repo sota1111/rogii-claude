@@ -14,14 +14,20 @@
       "prefix_rmse_limit": 1.0
     },
     {
-      "name": "likelihood_weighted_particle_filter",
+      "name": "physics_ml_gated_blend",
       "when": "no compatible train copy (hidden-test path)",
-      "method": "numpy PF ensemble tracking U=TVT+Z vs typewell GR, IRLS projection",
+      "method": "TVT_blend = weight*PF + (1-weight)*ML; PF = numpy likelihood-weighted ensemble (U=TVT+Z vs typewell GR, IRLS projection), ML = offline distilled GBRT base predictor (src/ml_predictor.py); degrades to whichever side is finite",
+      "blend_weight": 0.75,
+      "blend_weight_selection": "grid 0.50..1.00 argmin RMSE on leak-free fold-1 toe-holdout (disjoint from fold-0 confirm), frozen before reading fold-0 targets",
       "metric": "toe_holdout_rmse",
-      "toe_holdout_screen_rmse": 8.297,
-      "toe_holdout_confirm_rmse": 11.225,
+      "toe_holdout_screen_rmse": 7.379,
+      "toe_holdout_confirm_rmse": 11.173,
+      "component_pf_confirm_rmse": 11.225,
+      "component_ml_confirm_rmse": 17.645,
+      "beats_both_singles": true,
       "n_particles": 400,
-      "n_seeds": 32
+      "n_seeds": 32,
+      "issue": "SOT-2394"
     },
     {
       "name": "recency_weighted_offset_trend",

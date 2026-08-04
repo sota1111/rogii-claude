@@ -398,20 +398,6 @@ def predict_pf_well(horizontal_rows, typewell_rows):
     )
 
 
-def _load_pf_prediction(typewell_index, well, test_rows):
-    """Full-well PF trajectory, or None so the caller uses the offset trend."""
-    if np is None:
-        return None
-    typewell_path = typewell_index.get(well)
-    if typewell_path is None:
-        return None
-    try:
-        return predict_pf_well(test_rows, _read_rows(typewell_path))
-    except Exception as error:
-        print(f"particle filter skipped for {well}: {error}")
-        return None
-
-
 def _find_sample(input_dir):
     samples = list(input_dir.rglob("sample_submission.csv"))
     if len(samples) != 1:
@@ -781,6 +767,61 @@ _MODEL_JSON = r"""{"base":1.9587600956189326,"learning_rate":0.03,"n_features":2
 # === END ML_MODEL_JSON ===
 
 
+# --- Physics × ML gated blend (SOT-2394) ---
+# The block between the BLEND_SHARED_CODE markers is copied verbatim from
+# src/blend.py so the two entry points stay byte-identical (tests/test_blend.py).
+# === BEGIN BLEND_SHARED_CODE (synced verbatim into kaggle/rogii-claude-baseline.py) ===
+# Particle-filter share of the fallback blend ``weight*PF + (1-weight)*ML``.
+# Selected on a leak-free fold-1 toe-holdout subset (disjoint from the fold-0
+# confirm set) by ``scripts/select_blend_weight.py`` and frozen here; 1.0 would
+# recover the pure particle-filter champion. See docs/champion-selection.md.
+BLEND_WEIGHT = 0.75
+
+
+def blend_trajectories(pf, ml, weight=BLEND_WEIGHT):
+    """Blend two full-well TVT trajectories elementwise.
+
+    Returns ``weight * pf + (1 - weight) * ml`` where both are finite; where only
+    one is finite it degrades to that one (particle filter preferred), so a
+    missing/failed ML predictor recovers the pure-PF champion behaviour.
+    """
+    pf = np.asarray(pf, dtype=float)
+    ml = np.asarray(ml, dtype=float)
+    both = np.isfinite(pf) & np.isfinite(ml)
+    out = np.where(np.isfinite(pf), pf, ml)
+    return np.where(both, weight * pf + (1.0 - weight) * ml, out)
+# === END BLEND_SHARED_CODE ===
+
+
+def _load_fallback_prediction(typewell_index, well, test_rows):
+    """Full-well physics × ML blend for the hidden-test fallback (SOT-2394).
+
+    Returns ``blend_trajectories(PF, ML)``, or the pure particle filter when the
+    ML predictor is unavailable/fails, or None so the caller uses the offset
+    trend when the particle filter itself cannot run.
+    """
+    if np is None:
+        return None
+    typewell_path = typewell_index.get(well)
+    if typewell_path is None:
+        return None
+    typewell = _read_rows(typewell_path)
+    try:
+        pf = predict_pf_well(test_rows, typewell)
+    except Exception as error:
+        print(f"particle filter skipped for {well}: {error}")
+        return None
+    ml = None
+    try:
+        ml = predict_ml_well(test_rows, typewell)
+    except Exception as error:
+        print(f"ml predictor skipped for {well}: {error}")
+        ml = None
+    if ml is None:
+        return pf
+    return blend_trajectories(pf, ml, BLEND_WEIGHT)
+
+
 def main():
     sample_path = _find_sample(INPUT_DIR)
     horizontal_index = _index_horizontal_wells(INPUT_DIR)
@@ -799,7 +840,7 @@ def main():
     rows_by_well = {}
     models = {}
     curves = {}
-    pf_by_well = {}
+    fallback_by_well = {}
     output_rows = []
     for target in targets:
         target_id = target["id"]
@@ -825,12 +866,12 @@ def main():
                         f"prefix_rmse={curve.prefix_rmse:.4f}"
                     )
                 # The contact override, when it fires, covers the whole well, so
-                # run the particle filter only where the override is absent (the
+                # run the physics × ML blend only where the override is absent (the
                 # hidden-test path, where no same-well train copy exists).
-                pf_by_well[well] = (
+                fallback_by_well[well] = (
                     None
                     if curve is not None
-                    else _load_pf_prediction(
+                    else _load_fallback_prediction(
                         typewell_index, well, rows_by_well[well]
                     )
                 )
@@ -842,11 +883,11 @@ def main():
             md = float(rows[index]["MD"]) if rows[index].get("MD") else math.nan
         except (TypeError, ValueError):
             md = math.nan
-        pf = pf_by_well[well]
+        fallback = fallback_by_well[well]
         if curve is not None and curve.covers(md):
             prediction = curve.predict(md)
-        elif pf is not None and math.isfinite(pf[index]):
-            prediction = float(pf[index])
+        elif fallback is not None and math.isfinite(fallback[index]):
+            prediction = float(fallback[index])
         else:
             prediction = predict_offset_tvt(models[well], rows[index])
         if not math.isfinite(prediction):
