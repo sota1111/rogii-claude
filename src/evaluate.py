@@ -331,6 +331,85 @@ def evaluate_toe_gate(train_dir: str | Path) -> dict:
     return {"promoted": len(stages) == 2 and stages[-1]["passed"], "stages": stages}
 
 
+# Champion (PF fallback) toe-holdout RMSE, recorded in champion.json /
+# docs/champion-selection.md; the ML base predictor is measured against it.
+CHAMPION_PF_TOE_RMSE = {"screen": 8.297, "confirm": 11.225}
+
+
+def evaluate_ml_toe_holdout(
+    train_dir: str | Path,
+    *,
+    stage: str = "screen",
+    heel_fraction: float = TEST_HEEL_FRACTION,
+) -> dict:
+    """Measure the offline ML base predictor on the leak-free toe hold-out.
+
+    The withheld toe suffix of each fold-0 hold-out well is predicted by the
+    distilled GBRT (``src.ml_predictor``). The predictor's pooled RMSE/MAE is
+    reported against the champion particle-filter fallback (``CHAMPION_PF_TOE_RMSE``)
+    and the recency-weighted offset-trend baseline it must also clear.
+    """
+    from .ml_predictor import predict_ml_well
+
+    if stage not in {"screen", "confirm"}:
+        raise ValueError("stage must be 'screen' or 'confirm'")
+    if not 0.0 < heel_fraction < 1.0:
+        raise ValueError("heel_fraction must be between zero and one")
+    selected = sorted(holdout_wells(train_dir, PSEUDO_BLIND_FOLDS, PSEUDO_BLIND_FOLD))
+    if stage == "screen":
+        selected = selected[:SCREEN_WELLS]
+    actual: list[float] = []
+    ml_pred: list[float] = []
+    offset_pred: list[float] = []
+    root = Path(train_dir)
+    for files in discover_wells(train_dir):
+        if files.well not in selected:
+            continue
+        rows = load_horizontal(files.horizontal, require_target=True)
+        typewell = _read_typewell(root / f"{files.well}__typewell.csv")
+        heel_count = max(1, min(len(rows) - 1, round(len(rows) * heel_fraction)))
+        masked = [
+            dict(row, TVT_input=(row["TVT_input"] if i < heel_count else ""))
+            for i, row in enumerate(rows)
+        ]
+        model = fit_offset_trend(masked[:heel_count], recency_decay=LOCAL_OFFSET_RECENCY_DECAY)
+        prediction = predict_ml_well(masked, typewell)
+        for i in range(heel_count, len(rows)):
+            if not rows[i].get("TVT"):
+                continue
+            actual.append(float(rows[i]["TVT"]))
+            ml_pred.append(float(prediction[i]))
+            offset_pred.append(predict_offset_tvt(model, rows[i]))
+    ml_metrics = _metrics(actual, ml_pred)
+    offset_metrics = _metrics(actual, offset_pred)
+    champion = CHAMPION_PF_TOE_RMSE[stage]
+    return {
+        "stage": stage,
+        "predictor": "ml_gbrt_base",
+        "fold": PSEUDO_BLIND_FOLD,
+        "folds": PSEUDO_BLIND_FOLDS,
+        "heel_fraction": heel_fraction,
+        "wells": len(selected),
+        "well_ids": selected,
+        "rmse": ml_metrics["rmse"],
+        "mae": ml_metrics["mae"],
+        "rows": ml_metrics["rows"],
+        "offset_trend_rmse": offset_metrics["rmse"],
+        "offset_trend_mae": offset_metrics["mae"],
+        "champion_pf_rmse": champion,
+        "rmse_vs_champion_pf": ml_metrics["rmse"] - champion,
+        "beats_champion_pf": ml_metrics["rmse"] < champion,
+        "beats_offset_trend": ml_metrics["rmse"] < offset_metrics["rmse"],
+    }
+
+
+def _read_typewell(path: str | Path) -> list[dict[str, str]]:
+    import csv
+
+    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
+        return list(csv.DictReader(handle))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="ROGII local KPI and submission utility")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -348,6 +427,12 @@ def main() -> None:
     )
     toe.add_argument("--train-dir", type=Path, default=Path("data/raw/train"))
     toe.add_argument("--stage", choices=("screen", "confirm"), default="screen")
+    toe.add_argument(
+        "--predictor",
+        choices=("offset-trend", "ml"),
+        default="offset-trend",
+        help="offset-trend (default) or the offline ML base predictor",
+    )
     submission = subparsers.add_parser("submission", help="create a format-smoke submission")
     submission.add_argument("--sample", type=Path, default=Path("data/raw/sample_submission.csv"))
     submission.add_argument("--output", type=Path, default=Path("submission.csv"))
@@ -358,7 +443,10 @@ def main() -> None:
     elif args.command == "pseudo-blind":
         print(json.dumps(evaluate_pseudo_blind(args.train_dir, stage=args.stage), indent=2))
     elif args.command == "toe-holdout":
-        print(json.dumps(evaluate_toe_holdout(args.train_dir, stage=args.stage), indent=2))
+        if getattr(args, "predictor", "offset-trend") == "ml":
+            print(json.dumps(evaluate_ml_toe_holdout(args.train_dir, stage=args.stage), indent=2))
+        else:
+            print(json.dumps(evaluate_toe_holdout(args.train_dir, stage=args.stage), indent=2))
     else:
         targets = load_submission_targets(args.sample)
         predictions = {target.id: args.constant for target in targets}
