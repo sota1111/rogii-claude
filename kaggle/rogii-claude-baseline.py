@@ -793,6 +793,240 @@ def blend_trajectories(pf, ml, weight=BLEND_WEIGHT):
 # === END BLEND_SHARED_CODE ===
 
 
+# --- Beam-search + multi-scale NCC alignment candidate (SOT-2442) ---
+# The block between the ALIGN_SHARED_CODE markers is copied verbatim from
+# src/align.py so the two entry points stay byte-identical (tests/test_align.py).
+# === BEGIN ALIGN_SHARED_CODE (synced verbatim into kaggle/rogii-claude-baseline.py) ===
+# Beam-search + multi-scale NCC GR↔typewell alignment (SOT-2442). numpy-only,
+# __file__-independent, deterministic (no RNG). Ported from the public top
+# notebooks' portable alignment core; averaged over ALIGN_CONFIGS.
+ALIGN_CONFIGS = ((1.0, 0.8), (1.6, 0.4))   # (emit_scale, move_cost) beam configs, averaged
+ALIGN_DU = 0.5                             # residual grid resolution (TVT units)
+ALIGN_RADIUS = 18.0                        # +/- residual search radius around the drift baseline
+ALIGN_MAX_DELTA = 2                        # per-step grid-index move (backward allowed)
+ALIGN_NCC_WINDOWS = (8, 15, 25)            # multi-scale smoothing windows
+ALIGN_NCC_STRIDE = 3                       # subsample stride for the known-zone NCC
+ALIGN_NCC_SOFTMAX = 3.0                    # softmax temperature over per-scale NCC
+ALIGN_NCC_LAG = 12.0                       # +/- TVT registration lag searched by NCC
+ALIGN_NCC_LAG_STEP = 0.5                   # registration lag grid resolution
+
+
+def _align_column(rows, key):
+    values = np.empty(len(rows))
+    for i, row in enumerate(rows):
+        raw = row.get(key)
+        if raw is None or raw == "":
+            values[i] = np.nan
+        else:
+            try:
+                values[i] = float(raw)
+            except (TypeError, ValueError):
+                values[i] = np.nan
+    return values
+
+
+def _align_typewell(typewell_rows):
+    """Sorted (tw_tvt, tw_gr) with NaN GR mean-filled; None if fewer than two rows."""
+    tw_tvt = _align_column(typewell_rows, "TVT")
+    tw_gr = _align_column(typewell_rows, "GR")
+    finite = np.isfinite(tw_tvt)
+    if int(finite.sum()) < 2:
+        return None
+    order = np.argsort(tw_tvt[finite])
+    tvt = tw_tvt[finite][order]
+    gr = tw_gr[finite][order]
+    fill = float(np.nanmean(gr)) if np.isfinite(gr).any() else 0.0
+    gr = np.where(np.isfinite(gr), gr, fill)
+    return tvt, gr
+
+
+def _align_smooth(values, window):
+    """Odd-centred moving average; NaN-safe, preserves length."""
+    values = np.asarray(values, dtype=float)
+    if window <= 1 or len(values) == 0:
+        return values.copy()
+    filled = values.copy()
+    finite = np.isfinite(filled)
+    if not finite.all():
+        if not finite.any():
+            return filled
+        idx = np.arange(len(filled))
+        filled[~finite] = np.interp(idx[~finite], idx[finite], filled[finite])
+    half = int(window) // 2
+    kernel = np.ones(2 * half + 1, dtype=float) / float(2 * half + 1)
+    padded = np.pad(filled, half, mode="edge")
+    return np.convolve(padded, kernel, mode="valid")
+
+
+def _ncc_registration(md, z, gr, known_tvt, tw_tvt, tw_gr):
+    """Leak-free global TVT registration lag from multi-scale known-zone NCC.
+
+    Returns ``τ`` such that ``typewell_GR(TVT + τ)`` best matches the horizontal GR
+    over the known heel, combined across scales with ``softmax(corr·k)`` weights.
+    Reads only known TVT / GR / typewell, so it never touches the hidden toe.
+    """
+    known = np.isfinite(known_tvt)
+    if int(known.sum()) < ALIGN_NCC_WINDOWS[0] + 2:
+        return 0.0
+    ki = np.flatnonzero(known)[:: max(1, int(ALIGN_NCC_STRIDE))]
+    if len(ki) < 4:
+        return 0.0
+    ktvt = known_tvt[ki]
+    kgr = gr[ki]
+    lags = np.arange(-ALIGN_NCC_LAG, ALIGN_NCC_LAG + 1e-9, ALIGN_NCC_LAG_STEP)
+    best_lags = []
+    best_corrs = []
+    for window in ALIGN_NCC_WINDOWS:
+        smooth_gr = _align_smooth(kgr, window)
+        sg = smooth_gr - np.mean(smooth_gr)
+        sg_norm = float(np.sqrt(np.dot(sg, sg)))
+        if sg_norm < 1e-6:
+            continue
+        best_corr = -2.0
+        best_lag = 0.0
+        for lag in lags:
+            expected = np.interp(ktvt + lag, tw_tvt, tw_gr)
+            se = _align_smooth(expected, window)
+            se = se - np.mean(se)
+            se_norm = float(np.sqrt(np.dot(se, se)))
+            if se_norm < 1e-6:
+                continue
+            corr = float(np.dot(sg, se)) / (sg_norm * se_norm)
+            if corr > best_corr:
+                best_corr = corr
+                best_lag = float(lag)
+        if best_corr > -2.0:
+            best_lags.append(best_lag)
+            best_corrs.append(best_corr)
+    if not best_lags:
+        return 0.0
+    corrs = np.asarray(best_corrs, dtype=float)
+    weights = np.exp(ALIGN_NCC_SOFTMAX * (corrs - corrs.max()))
+    weights = weights / weights.sum()
+    return float(np.dot(weights, np.asarray(best_lags, dtype=float)))
+
+
+def _beam_viterbi(md, z, gr, u_base, ev_idx, states, tw_tvt, tw_gr, tau, gs,
+                  emit_scale, move_cost):
+    """±ALIGN_MAX_DELTA beam (exact Viterbi) over the residual grid; returns eval TVT."""
+    n_states = len(states)
+    center = n_states // 2
+    # Emission cost matrix over eval rows (rows x states).
+    tvt_grid = (u_base[ev_idx][:, None] + states[None, :]) - z[ev_idx][:, None]
+    expected = np.interp((tvt_grid + tau).ravel(), tw_tvt, tw_gr).reshape(tvt_grid.shape)
+    gr_ev = gr[ev_idx][:, None]
+    resid = (gr_ev - expected) / gs
+    emission = (resid * resid) / float(emit_scale)
+    emission = np.where(np.isfinite(emission), emission, 0.0)
+    deltas = np.arange(-ALIGN_MAX_DELTA, ALIGN_MAX_DELTA + 1)
+    # Start: prefer residual near zero (continuity with the known heel).
+    dp = emission[0] + 0.05 * np.abs(states)
+    back = np.empty((len(ev_idx), n_states), dtype=np.int32)
+    back[0] = np.arange(n_states)
+    for i in range(1, len(ev_idx)):
+        best = np.full(n_states, np.inf)
+        arg = np.zeros(n_states, dtype=np.int32)
+        for delta in deltas:
+            # transition from state a=b-delta into state b
+            shifted = np.full(n_states, np.inf)
+            cost = move_cost * abs(int(delta))
+            if delta >= 0:
+                if delta < n_states:
+                    shifted[delta:] = dp[: n_states - delta] + cost
+                src = np.arange(n_states) - delta
+            else:
+                d = -delta
+                if d < n_states:
+                    shifted[: n_states - d] = dp[d:] + cost
+                src = np.arange(n_states) + d
+            take = shifted < best
+            best = np.where(take, shifted, best)
+            arg = np.where(take, np.clip(src, 0, n_states - 1).astype(np.int32), arg)
+        dp = best + emission[i]
+        back[i] = arg
+    # Traceback from the minimum-cost final state.
+    s = int(np.argmin(dp))
+    path = np.empty(len(ev_idx), dtype=np.int32)
+    for i in range(len(ev_idx) - 1, -1, -1):
+        path[i] = s
+        s = int(back[i, s])
+    chosen = states[path]
+    return (u_base[ev_idx] + chosen) - z[ev_idx]
+
+
+def _drift_baseline(md, z, known_tvt):
+    """Finite U_base = U_anchor + drift·(MD − MD_last) from the known heel."""
+    known = np.isfinite(known_tvt)
+    kn = np.flatnonzero(known)
+    last = int(kn[-1])
+    u = known_tvt + z
+    u_anchor = float(u[last])
+    last_md = float(md[last])
+    tail = kn[-30:]
+    du = np.diff(u[tail])
+    dm = np.diff(md[tail])
+    positive = dm > 0
+    drift = float(np.median(du[positive] / dm[positive])) if int(positive.sum()) >= 3 else 0.0
+    if not np.isfinite(drift):
+        drift = 0.0
+    return u_anchor + drift * (md - last_md)
+
+
+def predict_beam_well(horizontal_rows, typewell_rows):
+    """Full-well beam+NCC TVT candidate: known heel passes through, toe is aligned.
+
+    Returns a full-well trajectory the same length as ``horizontal_rows`` for the
+    gold candidate pool. Known ``TVT_input`` rows are copied verbatim; the hidden
+    toe is estimated by the beam Viterbi (averaged over ``ALIGN_CONFIGS``) with the
+    NCC registration ``τ``. Degrades to the finite drift baseline on the toe when
+    the typewell/GR signal is unusable, and to the raw known array when it cannot
+    anchor at all.
+    """
+    md = _align_column(horizontal_rows, "MD")
+    z = _align_column(horizontal_rows, "Z")
+    gr = _align_column(horizontal_rows, "GR")
+    known_tvt = _align_column(horizontal_rows, "TVT_input")
+    out = known_tvt.copy()
+    known = np.isfinite(known_tvt)
+    ev = np.flatnonzero(~known)
+    if not known.any() or ev.size == 0 or not np.isfinite(md).all():
+        return out
+    u_base = _drift_baseline(md, z, known_tvt)
+    baseline_tvt = u_base - z            # finite fallback for the toe
+    tw = _align_typewell(typewell_rows)
+    if tw is None:
+        out[ev] = baseline_tvt[ev]
+        return out
+    tw_tvt, tw_gr = tw
+    tau = _ncc_registration(md, z, gr, known_tvt, tw_tvt, tw_gr)
+    # GR emission scale from the known-zone residual (mirrors the particle filter's gs).
+    kmask = known & np.isfinite(gr)
+    if int(kmask.sum()) >= 3:
+        tw_at_known = np.interp(known_tvt[kmask] + tau, tw_tvt, tw_gr)
+        gs = float(np.clip(np.nanstd(gr[kmask] - tw_at_known), 10.0, 60.0))
+    else:
+        gs = 30.0
+    k = int(round(ALIGN_RADIUS / ALIGN_DU))
+    states = np.arange(-k, k + 1, dtype=float) * ALIGN_DU
+    preds = []
+    for emit_scale, move_cost in ALIGN_CONFIGS:
+        try:
+            preds.append(
+                _beam_viterbi(md, z, gr, u_base, ev, states, tw_tvt, tw_gr,
+                              tau, gs, emit_scale, move_cost)
+            )
+        except Exception:
+            continue
+    if not preds:
+        out[ev] = baseline_tvt[ev]
+        return out
+    est = np.mean(np.stack(preds, axis=0), axis=0)
+    est = np.where(np.isfinite(est), est, baseline_tvt[ev])
+    out[ev] = est
+    return out
+# === END ALIGN_SHARED_CODE ===
+
+
 # --- Gold-calibration overlay (visible-prefix self-verified anchor, SOT-2395) ---
 # The block between the GOLD_SHARED_CODE markers is copied verbatim from
 # src/calibrate.py so the two entry points stay byte-identical (tests/test_calibrate.py).
@@ -879,11 +1113,13 @@ def _gold_robust_poly_predict(x_known, y_known, x_all, deg):
 
 
 def _gold_candidate_pool(horizontal_rows, typewell_rows, weight=BLEND_WEIGHT):
-    """Portable per-well candidate trajectories {blend, pf, ml, poly}.
+    """Portable per-well candidate trajectories {blend, pf, ml, poly, beam}.
 
     ``blend`` (the stage-2 base) and its two singles come from the particle filter
     and the offline ML predictor; ``poly`` is a robust MD→TVT extrapolation from the
-    known heel. Known heel rows pass through unchanged for every candidate.
+    known heel; ``beam`` is the beam-search + multi-scale NCC GR↔typewell alignment
+    (``predict_beam_well``, SOT-2442). Known heel rows pass through unchanged for
+    every candidate.
     """
     pf = predict_pf_well(horizontal_rows, typewell_rows)
     try:
@@ -897,11 +1133,17 @@ def _gold_candidate_pool(horizontal_rows, typewell_rows, weight=BLEND_WEIGHT):
     known = np.isfinite(ktvt)
     poly = _gold_robust_poly_predict(md[known], ktvt[known], md, 2)
     poly = np.where(known, ktvt, poly)
+    try:
+        beam = np.asarray(predict_beam_well(horizontal_rows, typewell_rows), dtype=float)
+    except Exception:
+        beam = poly
+    beam = np.where(np.isfinite(beam), beam, poly)
     return {
         "blend": np.asarray(blend, dtype=float),
         "pf": np.asarray(pf, dtype=float),
         "ml": ml_arr,
         "poly": poly,
+        "beam": beam,
     }
 
 

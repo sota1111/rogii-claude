@@ -109,6 +109,47 @@ moves. Exec byte-identity between `src/calibrate.py` and the kernel is enforced 
 `test_shared_block_is_byte_identical`). **Nothing is submitted here** — the parent
 (SOT-2387) owns Kaggle submission of this final blended+calibrated champion.
 
+## Beam-search + NCC alignment candidate promotion (SOT-2442, 2026-08-04)
+
+Cycle 9 (human re-scope "取り込み優勝ノート", parent SOT-2438) ports the most
+frequently reused *framework-free* technique from the public top notebooks
+([`romantamrazov/rogii-better-solution-lb-9-956`](https://www.kaggle.com/code/romantamrazov/rogii-better-solution-lb-9-956),
+`…/rogii-super-solution-lb-top-3`) as a **fourth gold-pool candidate** `beam`
+(`src/align.py` `predict_beam_well`):
+
+* **±2-delta beam search (backward-allowed Viterbi)** aligning the stratigraphic
+  level `U = TVT + Z` to the typewell GR-vs-TVT signature. States are the residual
+  of `U` around a robust heel-drift baseline on a grid; each step may move the grid
+  index by `Δ ∈ [−2, +2]` at cost `move_cost·|Δ|`, and the emission is
+  `((GR − typewell_GR(TVT + τ))/gs)² / emit_scale`. Traceback → toe `TVT`, averaged
+  over `ALIGN_CONFIGS` `(emit_scale, move_cost)`.
+* **Multi-scale NCC** (windows 8/15/25, `softmax(corr·3.0)`) measures a **leak-free
+  global TVT registration** `τ` on the *known heel* only (reads known TVT + GR +
+  typewell, never the toe), correcting a systematic TVT-frame offset.
+
+It is numpy-only, `__file__`-independent, and fully **deterministic** (no RNG). The
+gold gate back-tests `{blend, pf, ml, poly, beam}` per well and only adopts `beam`
+with the same conservative margin, so the addition is non-regressive by construction.
+
+Measured on the same leak-free fold-0 toe-holdout gate (`weight = 0.75`,
+`python3 -m src.evaluate toe-holdout --predictor gold`):
+
+| Stage | Wells | Toe rows | Gold RMSE | Blend RMSE | PF RMSE | Beats blend |
+| --- | ---: | ---: | ---: | ---: | ---: | :---: |
+| screen | 5 | 20,885 | **5.778** | 7.536 | 8.297 | **yes** |
+| confirm | 156 | 746,360 | **11.074** | 11.173 | 11.225 | **yes** |
+
+Adding `beam` lowers the gold confirm RMSE from the prior champion **11.115** to
+**11.074** (**−0.041**), still beating the blend (**−0.099**) and the PF champion
+(**−0.151**), so it is **promoted**. The conservative gate now fires on **43 of
+156** wells (up from 36 — `beam` wins the heel backtest on the extra wells); the
+rest keep the stage-2 blend. Visible wells stay on the guarded contact override, so
+the local `submission.csv` is **byte-identical** (only the hidden-test trajectory
+moves). Exec byte-identity of the `ALIGN_SHARED_CODE` block and
+`predict_beam_well` between `src/align.py` and the kernel is enforced by
+`tests/test_align.py`; full suite **55 passed**. **Nothing is submitted here** — the
+parent (SOT-2438) owns Kaggle submission of the updated champion kernel.
+
 ## Particle-filter fallback promotion (cycle 5, 2026-08-03)
 
 The contact override below reconstructs the three **visible** test wells nearly
