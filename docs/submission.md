@@ -251,3 +251,44 @@ enforced by `tests/test_calibrate.py`; `pytest` is green (46 passed).
 parent SOT-2387 owns final-submission selection via
 `scripts/ai/kaggle_targets_submit.sh`. This closes the three-stage kernel port
 toward the `8.752 → 7.872` gap.
+
+## Cycle 3 (SOT-2387) parent aggregation — kernel v8 submitted
+
+The parent resume run (SOT-2387) aggregated the three completed children and
+submitted the new champion. All prerequisite children reached **Done**:
+
+| Stage | Issue | Layer | Leak-free fold-0 confirm RMSE | Decision |
+| --- | --- | --- | ---: | --- |
+| 1 | SOT-2393 | offline ML base (TVT) predictor | 17.645 | foundation (inconclusive) |
+| 2 | SOT-2394 | physics×ML gated blend (`w=0.75`) | 11.173 | promoted (beats PF 11.225) |
+| 3 | SOT-2395 | gold-calibration overlay | **11.115** | promoted (beats blend + both singles) |
+
+**Why a new kernel push was required.** This is a Kaggle **code competition**:
+the hidden test set is scored by re-running the submitted kernel on Kaggle.
+Children are forbidden from submitting, so the on-Kaggle kernel was still
+**v7** (cycle-5 PF fallback = public LB 8.752) even though the children had
+updated `kaggle/rogii-claude-baseline.py` on disk with the blend + gold layers.
+The local `submission.csv` (`sha256 46d09239…`) is byte-identical across cycles
+because it only contains the 3 **visible** test wells, all covered by the guarded
+contact override — only the **hidden-test fallback path** changed. So the visible
+CSV fingerprint is not a sufficient artifact identity for this code competition;
+the real artifact is the kernel version.
+
+**Submission (parent-only, via control-plane).**
+
+- Quality gate: `pytest` **46 passed** (incl. `src/`↔kernel exec byte-match for
+  ML predictor, blend, and gold-calibration; `__file__`-independent loader).
+- Pushed kernel **version 8** (`kaggle kernels push`) → run status COMPLETE
+  (interactive run reproduces the 3 visible wells via contact override; the
+  gold-calibrated physics-ML blend runs on the hidden toe at submit time).
+- Bumped registry `submit.version` 7 → 8 and submitted with
+  `bash scripts/ai/kaggle_targets_submit.sh --competition rogii --repo rogii-claude --execute`
+  (mandatory path; the Kaggle CLI was **not** called directly to bypass the gate).
+- Result: submission **ref 55233567**, `SubmissionStatus.PENDING` (hidden-test
+  scoring on this competition takes hours — the concurrent `physics-full` push
+  from 01:50 was still PENDING at submit time). The public score is captured by
+  the later cron / `collectImproveContext` score-sync once COMPLETE.
+
+The previous champion (kernel v7, ref 55214209, LB **8.752**) remains on the
+leaderboard; Kaggle keeps every submission, so this push cannot regress the
+selected final score. Deadline `2026-08-05T23:59Z`; 3 submissions remaining today.
