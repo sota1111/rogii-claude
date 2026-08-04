@@ -76,6 +76,39 @@ between `src/` and the kernel is enforced by `tests/test_blend.py` and
 calibration) produces the final blend champion artifact and the parent
 (SOT-2387) owns Kaggle submission.
 
+## Gold-calibration overlay promotion (stage 3, SOT-2395, 2026-08-04)
+
+The three-stage port of the reference kernel
+([`evgendvorkin/rogii-physics-lb-7-872-v48`](https://www.kaggle.com/code/evgendvorkin/rogii-physics-lb-7-872-v48),
+LB 7.872) finishes here with its final **gold-calibration** layer (`ROGII_GOLD_*`
+= a per-well *visible-prefix self-verified anchor*). After the stage-2 blend, each
+well backtests a portable candidate pool `{blend, pf, ml, poly}` on withheld tails
+of its **own known heel** (no toe/target leaks), aggregates each candidate's RMSE
+(`median + 0.10·std`), and only when a conservative gate clears
+(`gain ≥ 1.0` / `consistency ≥ 0.67` / `best ≤ 12`) does it apply a soft, ramped,
+clipped move of the best candidate into the **hidden toe**. All thresholds are
+frozen from the reference kernel's conservative profile (`src/calibrate.py`
+`GOLD_PROFILE`), so the overlay is leak-free by provenance, not tuned on our gate.
+
+Measured on the mandatory leak-free fold-0 toe-holdout gate with the frozen
+`weight = 0.75`, `python3 -m src.evaluate toe-holdout --predictor gold`:
+
+| Stage | Wells | Toe rows | Gold RMSE | Blend RMSE | PF RMSE | Beats blend |
+| --- | ---: | ---: | ---: | ---: | ---: | :---: |
+| confirm | 156 | 746,360 | **11.115** | 11.173 | 11.225 | **yes** |
+
+The gold overlay confirm RMSE **11.115** beats the stage-2 blend (**−0.058**) and
+the PF champion (**−0.110**), so it is **promoted** as the hidden-test fallback:
+`src/predict.py` (and the kernel mirror) now emit `gold_calibrate_trajectory`
+where the contact override is absent. The gate is conservative — it fired on only
+**36 of 156** wells; the other 120 keep the stage-2 blend unchanged. Visible wells
+stay on the guarded contact override, so the local `submission.csv` is **byte-identical**
+(`sha256 46d09239…`, `visible wells unchanged`); only the hidden-test trajectory
+moves. Exec byte-identity between `src/calibrate.py` and the kernel is enforced by
+`tests/test_calibrate.py` (`test_matches_kernel_implementation`,
+`test_shared_block_is_byte_identical`). **Nothing is submitted here** — the parent
+(SOT-2387) owns Kaggle submission of this final blended+calibrated champion.
+
 ## Particle-filter fallback promotion (cycle 5, 2026-08-03)
 
 The contact override below reconstructs the three **visible** test wells nearly

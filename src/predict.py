@@ -23,6 +23,11 @@ except ImportError:  # numpy unavailable: blend degrades to particle filter only
 
 from src.blend import BLEND_WEIGHT, blend_trajectories
 
+try:
+    from src.calibrate import gold_calibrate_trajectory
+except ImportError:  # numpy unavailable: blend without the gold overlay
+    gold_calibrate_trajectory = None
+
 HORIZONTAL_SUFFIX = "__horizontal_well.csv"
 TYPEWELL_SUFFIX = "__typewell.csv"
 
@@ -48,11 +53,13 @@ def _load_contact_curve(
 
 
 def _run_fallback_blend(test_dir: Path, well: str, test_rows: list[dict[str, str]]):
-    """Full-well physics × ML blend trajectory for the hidden-test fallback.
+    """Full-well gold-calibrated physics × ML trajectory for the hidden-test fallback.
 
-    Returns ``blend_trajectories(PF, ML)`` (SOT-2394), or the pure particle filter
-    when the ML predictor is unavailable/fails, or None so the caller uses the
-    offset trend when the particle filter itself cannot run.
+    Returns the stage-2 ``blend_trajectories(PF, ML)`` with the SOT-2395 gold
+    overlay applied (``gold_calibrate_trajectory``: a per-well visible-prefix
+    self-verified move on top of the blend), or the pure particle filter when the
+    ML predictor is unavailable/fails, or None so the caller uses the offset trend
+    when the particle filter itself cannot run.
     """
     if predict_pf_well is None:
         return None
@@ -74,7 +81,9 @@ def _run_fallback_blend(test_dir: Path, well: str, test_rows: list[dict[str, str
             ml = None
     if ml is None:
         return pf
-    return blend_trajectories(pf, ml, BLEND_WEIGHT)
+    if gold_calibrate_trajectory is None:
+        return blend_trajectories(pf, ml, BLEND_WEIGHT)
+    return gold_calibrate_trajectory(test_rows, typewell, BLEND_WEIGHT)
 
 
 def generate_submission(

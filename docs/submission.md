@@ -220,3 +220,34 @@ artifact was already submitted today)` — the current `submission.csv`
 fingerprint byte-matches the already-submitted ref `55214209`. Per SOT-2387
 step 3 this is recorded as **non-promotion / no new artifact**, not a submission
 success; the cron and child issues do not submit either.
+
+## Cycle 3 (SOT-2387) stage 3 — gold-calibration overlay promoted (SOT-2395)
+
+Final stage of the three-stage port of the reference kernel
+`evgendvorkin/rogii-physics-lb-7-872-v48` (LB 7.872): stage 1 (SOT-2393) shipped
+the offline ML base predictor, stage 2 (SOT-2394) blended it with the champion
+particle filter at the hidden-test fallback, and this stage adds the reference
+kernel's final **gold-calibration** layer (`ROGII_GOLD_*` = per-well
+visible-prefix self-verified anchor, `src/calibrate.py`).
+
+**Result — promoted.** Leak-free fold-0 toe-holdout confirm (156 wells /
+746,360 rows, `weight = 0.75`):
+
+| Predictor | Confirm RMSE | vs blend | vs PF |
+| --- | ---: | ---: | ---: |
+| gold overlay (SOT-2395) | **11.115** | −0.058 | −0.110 |
+| stage-2 blend (SOT-2394) | 11.173 | — | −0.052 |
+| PF champion (LB 8.752) | 11.225 | +0.052 | — |
+
+The gold overlay beats the stage-2 blend and both standalone predictors, firing
+conservatively on only **36 of 156** wells. `champion.json` fallback layer is
+updated to `gold_calibrated_physics_ml_blend`; `submission.csv` is regenerated
+and stays **byte-identical** (`sha256 46d09239…`) because the three visible test
+wells are fully covered by the guarded contact override — only the hidden-test
+trajectory changes. Exec byte-identity between `src/` and the kernel mirror is
+enforced by `tests/test_calibrate.py`; `pytest` is green (46 passed).
+
+**Kaggle: not submitted here.** Per SOT-2395 the child does not submit; the
+parent SOT-2387 owns final-submission selection via
+`scripts/ai/kaggle_targets_submit.sh`. This closes the three-stage kernel port
+toward the `8.752 → 7.872` gap.

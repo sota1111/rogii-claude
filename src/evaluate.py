@@ -486,6 +486,96 @@ def evaluate_blend_toe_holdout(
     }
 
 
+def evaluate_gold_toe_holdout(
+    train_dir: str | Path,
+    *,
+    stage: str = "screen",
+    heel_fraction: float = TEST_HEEL_FRACTION,
+    weight: float | None = None,
+) -> dict:
+    """Measure the gold-calibration overlay on the leak-free toe hold-out (SOT-2395).
+
+    For each fold-0 hold-out well the withheld toe suffix is predicted by the
+    stage-2 blend (``src.blend``) and by the gold-calibrated trajectory
+    (``src.calibrate.gold_calibrate_trajectory``), which adds a per-well
+    visible-prefix self-verified move on top of the blend. Reports the pooled
+    RMSE/MAE of the pure particle filter, the blend, and the gold overlay so the
+    overlay can be compared against the stage-2 blend it must not regress. Gold
+    **promotes** only when its confirm RMSE beats the blend.
+    """
+    from .blend import BLEND_WEIGHT, blend_trajectories
+    from .calibrate import gold_calibrate_trajectory
+    from .ml_predictor import predict_ml_well
+    from .physics import predict_pf_well
+
+    if stage not in {"screen", "confirm"}:
+        raise ValueError("stage must be 'screen' or 'confirm'")
+    if not 0.0 < heel_fraction < 1.0:
+        raise ValueError("heel_fraction must be between zero and one")
+    if weight is None:
+        weight = BLEND_WEIGHT
+    selected = sorted(holdout_wells(train_dir, PSEUDO_BLIND_FOLDS, PSEUDO_BLIND_FOLD))
+    if stage == "screen":
+        selected = selected[:SCREEN_WELLS]
+    actual: list[float] = []
+    pf_pred: list[float] = []
+    blend_pred: list[float] = []
+    gold_pred: list[float] = []
+    moved_wells = 0
+    root = Path(train_dir)
+    for files in discover_wells(train_dir):
+        if files.well not in selected:
+            continue
+        rows = load_horizontal(files.horizontal, require_target=True)
+        typewell = _read_typewell(root / f"{files.well}__typewell.csv")
+        heel_count = max(1, min(len(rows) - 1, round(len(rows) * heel_fraction)))
+        masked = [
+            dict(row, TVT_input=(row["TVT_input"] if i < heel_count else ""))
+            for i, row in enumerate(rows)
+        ]
+        pf = predict_pf_well(masked, typewell)
+        ml = predict_ml_well(masked, typewell)
+        blended = blend_trajectories(pf, ml, weight)
+        gold = gold_calibrate_trajectory(masked, typewell, weight)
+        if not bool((gold != blended).any()):
+            pass
+        else:
+            moved_wells += 1
+        for i in range(heel_count, len(rows)):
+            if not rows[i].get("TVT"):
+                continue
+            if not (math.isfinite(pf[i]) and math.isfinite(blended[i]) and math.isfinite(gold[i])):
+                continue
+            actual.append(float(rows[i]["TVT"]))
+            pf_pred.append(float(pf[i]))
+            blend_pred.append(float(blended[i]))
+            gold_pred.append(float(gold[i]))
+    pf_metrics = _metrics(actual, pf_pred)
+    blend_metrics = _metrics(actual, blend_pred)
+    gold_metrics = _metrics(actual, gold_pred)
+    return {
+        "stage": stage,
+        "predictor": "gold_calibration",
+        "weight": weight,
+        "fold": PSEUDO_BLIND_FOLD,
+        "folds": PSEUDO_BLIND_FOLDS,
+        "heel_fraction": heel_fraction,
+        "wells": len(selected),
+        "moved_wells": moved_wells,
+        "well_ids": selected,
+        "rmse": gold_metrics["rmse"],
+        "mae": gold_metrics["mae"],
+        "rows": gold_metrics["rows"],
+        "blend_rmse": blend_metrics["rmse"],
+        "blend_mae": blend_metrics["mae"],
+        "pf_rmse": pf_metrics["rmse"],
+        "rmse_vs_blend": gold_metrics["rmse"] - blend_metrics["rmse"],
+        "rmse_vs_pf": gold_metrics["rmse"] - pf_metrics["rmse"],
+        "beats_blend": gold_metrics["rmse"] < blend_metrics["rmse"],
+        "no_regression_vs_blend": gold_metrics["rmse"] <= blend_metrics["rmse"],
+    }
+
+
 def _read_typewell(path: str | Path) -> list[dict[str, str]]:
     import csv
 
@@ -512,9 +602,9 @@ def main() -> None:
     toe.add_argument("--stage", choices=("screen", "confirm"), default="screen")
     toe.add_argument(
         "--predictor",
-        choices=("offset-trend", "ml", "blend"),
+        choices=("offset-trend", "ml", "blend", "gold"),
         default="offset-trend",
-        help="offset-trend (default), the offline ML base predictor, or the PF×ML blend",
+        help="offset-trend (default), the ML base predictor, the PF×ML blend, or the gold overlay",
     )
     submission = subparsers.add_parser("submission", help="create a format-smoke submission")
     submission.add_argument("--sample", type=Path, default=Path("data/raw/sample_submission.csv"))
@@ -531,6 +621,8 @@ def main() -> None:
             print(json.dumps(evaluate_ml_toe_holdout(args.train_dir, stage=args.stage), indent=2))
         elif predictor == "blend":
             print(json.dumps(evaluate_blend_toe_holdout(args.train_dir, stage=args.stage), indent=2))
+        elif predictor == "gold":
+            print(json.dumps(evaluate_gold_toe_holdout(args.train_dir, stage=args.stage), indent=2))
         else:
             print(json.dumps(evaluate_toe_holdout(args.train_dir, stage=args.stage), indent=2))
     else:
