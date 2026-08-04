@@ -310,3 +310,63 @@ remain unchanged.
 The reference notebook's GPU-trained LGBM/CatBoost weights and model-package
 correction are not portable logic and remain outside this child issue. No
 Kaggle submission was made; submission ownership remains with parent SOT-2406.
+
+## Cycle 6 model-package pretrained-ensemble integration — rejected (SOT-2422)
+
+Child SOT-2422 evaluated integrating the reference notebook's **model package**
+(`pilkwang/rogii-model-package`, submission profile `vp_balanced_modelpkg_005`)
+as offline-attached, inference-only pretrained weights to reach bronze
+(`score ≤ 6.410`, ~top 10% of 6,101 teams). The package and its use inside the
+reference kernel were pulled and analysed directly (`kaggle datasets`
+manifest/blend-config/feature-builders + the reference kernel's
+`model_package_correction` cell).
+
+**What the model package actually is.** A `drift_ncc` 5-model stack predicting a
+`delta` to `last_known_TVT`, blended (groupkfold OOF weights) as:
+
+| Branch | Type | File | Blend weight |
+| --- | --- | --- | ---: |
+| catboost_alltrain | `catboost_cbm` | `.cbm` | 0.450 |
+| sequence_tcn tcn_residual | **`torch_tcn`** (GPU-trained NN) | `.pt` | 0.417 |
+| hgb_alltrain | `sklearn_pickle` (HistGBR) | `.joblib` | 0.118 |
+| lgb_alltrain | `lightgbm_booster` | `.txt` | 0.015 |
+| xgb_alltrain | `xgboost_json` | `.json` | ~1.6e-13 |
+
+Features are **480 columns** (`drift_ncc_v1`) built by a 146 KB pandas feature
+engine (`rogii_feature_core.py`: formation KNN imputers, beam features,
+row-ANCC, typewell matching). The package's own group-k-fold OOF RMSE is
+**10.670** (3.78 M rows). It is applied to the base submission as a **gated
+correction**: `MODEL_PACKAGE_GATED_MAX_WEIGHT = 0.008`,
+`gate = gmax / (1 + (|pkg − base| / 6)²)`, auto-disabled when the p95 diff > 25.
+On the reference base (public LB **6.477**), the human measured
+`vp_balanced_modelpkg_005 ≈ 6.410` — i.e. the model package contributes only
+**~0.067 LB (≈1 % relative)**.
+
+**Result — not promoted.** Two independent reasons:
+
+1. **Base gap dominates.** Our on-Kaggle base is kernel v8
+   `gold_calibrated_physics_ml_blend` at public LB **8.739**. The 2.329-LB gap to
+   bronze is the reference *physics/logic* pipeline, whose port (SP45 selector)
+   was already rejected on toe-holdout in SOT-2421 (cand 11.541 > champ 11.115).
+   A 0.008-gated ~0.067-LB nudge cannot close a 2.3-LB gap (best case ~8.67).
+   The package's `delta` models also assume the reference base's 480-feature
+   frame / `last_known_TVT`, which our numpy-only pipeline does not produce — so
+   grafting only the package puts it out-of-distribution.
+2. **Not portable in practice.** Our submission kernel is stdlib + numpy only.
+   Integration would require pandas / scipy / sklearn / lightgbm / catboost /
+   xgboost **plus torch** (the TCN carries 42 % of the blend weight and the
+   reference kernel runs `enable_gpu: true`), the 146 KB / 480-feature engine,
+   and a ~200 MB attached dataset. Dropping the TCN to stay CPU-light removes
+   42 % of the ensemble. A high-risk wholesale rewrite the day before the
+   deadline — risking the working champion v8 — is not justified by a ~0.067-LB
+   expected gain.
+
+`champion.json`, the kernel, and `submission.csv` remain unchanged; `pytest`
+stays **46 passed** (the change is docs + ledger only). No Kaggle submission was
+made (submission ownership stays with parent SOT-2406).
+
+**Escalation-ladder implication.** The external-knowledge rung (reference-NB
+physics base + model package) is now effectively exhausted for reaching bronze
+in-repo: bronze requires porting the reference *physics base* itself, which
+SOT-2421 could not promote. Whether to flip the target to `mode: "maintain"`
+is deferred to parent SOT-2406's deadline-converge run.
