@@ -150,6 +150,56 @@ moves). Exec byte-identity of the `ALIGN_SHARED_CODE` block and
 `tests/test_align.py`; full suite **55 passed**. **Nothing is submitted here** — the
 parent (SOT-2438) owns Kaggle submission of the updated champion kernel.
 
+## Constrained + stochastic (Gumbel) DTW alignment candidate promotion (SOT-2444, 2026-08-05)
+
+Cycle 9 continues the pool-candidate line (parent SOT-2438) by porting the
+distinctive technique of the public DWT/training notebooks
+([`nihilisticneuralnet/9.251-DWT-based`],
+[`rauffauzanrambe/9.538-training`]) as a **fifth gold-pool candidate** `dtw`
+(`src/dtw_align.py` `predict_dtw_well`):
+
+* **Sakoe-Chiba band-constrained DTW.** Discretise the residual `δ = TVT −
+  drift_baseline` on a grid inside a band `|δ| ≤ R` and run a band-constrained
+  Viterbi/DTW DP whose emission is `((GR − typewell_GR(TVT))/gs)² / emit_scale`
+  and whose per-step slope move is bounded (`Δ ∈ [−2, +2]`, cost `move_cost·|Δ|`).
+  Several radii `R ∈ {20, 50, 100, 200}` are ensembled (tight = conservative,
+  wide = large warp).
+* **Stochastic DTW (Gumbel).** For each radius, `K = 12` Gumbel-perturbed
+  tracebacks (`−T·log(−log(U))`, `T = 3.0`) yield a per-row **mean** (the DTW
+  estimate) and **std** (uncertainty). The move is shrunk toward the drift
+  baseline where the paths disagree (`w = 1/(1 + (std/6)²)`), so low-uncertainty
+  wells keep the full warp and ambiguous ones stay conservative.
+
+It is numpy-only, `__file__`-independent, and fully **deterministic** (fixed
+`RandomState` seed). The gold gate back-tests `{blend, pf, ml, poly, beam, dtw}`
+per well and only adopts `dtw` with the same conservative margin, so the addition
+is non-regressive by construction.
+
+Measured on the same leak-free fold-0 toe-holdout gate (`weight = 0.75`,
+`python3 -m src.evaluate toe-holdout --predictor gold --stage confirm`):
+
+| Stage | Wells | Toe rows | Gold RMSE | Blend RMSE | PF RMSE | Beats blend |
+| --- | ---: | ---: | ---: | ---: | ---: | :---: |
+| confirm | 156 | 746,360 | **11.073634** | 11.173 | 11.225 | **yes** |
+
+Adding `dtw` lowers the gold confirm RMSE from the prior beam-only pool
+**11.073964** to **11.073634** (**−0.00033**), still beating the blend and PF. The
+conservative gate now fires on **44 of 156** wells (up from 43 — `dtw` wins the
+heel backtest on one extra well). This is a **marginal, 4th-decimal improvement**;
+its real value is an additional low-risk alignment viewpoint in the pool, and the
+hidden-test/real-LB effect is expected to be negligible. It is promoted because it
+is a **deterministic, strictly non-regressive** pool addition (worst case: the gate
+never picks it and the champion is unchanged), consistent with the beam promotion
+(SOT-2442). Visible wells stay on the guarded contact override, so the local
+`submission.csv` is **byte-identical** (only the hidden-test trajectory moves).
+Exec byte-identity of the `DTW_SHARED_CODE` block and `predict_dtw_well` between
+`src/dtw_align.py` and the kernel is enforced by `tests/test_dtw_align.py`; full
+suite **63 passed**. **Nothing is submitted here** — the parent (SOT-2438) owns
+Kaggle submission of the updated champion kernel.
+
+[`nihilisticneuralnet/9.251-DWT-based`]: https://www.kaggle.com/code/nihilisticneuralnet
+[`rauffauzanrambe/9.538-training`]: https://www.kaggle.com/code/rauffauzanrambe
+
 ## Particle-filter fallback promotion (cycle 5, 2026-08-03)
 
 The contact override below reconstructs the three **visible** test wells nearly
