@@ -370,3 +370,61 @@ physics base + model package) is now effectively exhausted for reaching bronze
 in-repo: bronze requires porting the reference *physics base* itself, which
 SOT-2421 could not promote. Whether to flip the target to `mode: "maintain"`
 is deferred to parent SOT-2406's deadline-converge run.
+
+## Cycle 9 GR conditioning (detrend + SavGol) & WLS formation calibration — rejected (SOT-2443)
+
+Child SOT-2443 evaluated porting the portable signal-processing techniques from
+the public top notebook `romantamrazov/rogii-super-solution-lb-top-3` into the
+hidden-test particle-filter fallback (`src/physics.py`), numpy-only and
+`__file__`-independent:
+
+1. **GR detrend residual** — remove a robust (IRLS) MD/TVT-linear background trend
+   from the GR, applied consistently to the horizontal GR (over MD) and the
+   typewell GR (over TVT), so the likelihood matches the local wiggle signature
+   rather than each log's slowly-varying baseline.
+2. **Savitzky-Golay (window 17, poly 3)** smoothing as a precomputed constant FIR
+   filter (coefficients derived from the least-squares polynomial design at
+   import; scipy-free).
+3. **WLS (exp-decay 0.02) tail-upweighted** estimate of the stratigraphic offset
+   `U = TVT + Z` and its slope, seeding the particle cloud and drift — the
+   reference kernel's tail-weighted formation `b_well` calibration (our
+   hidden-test path has no formation column, so it maps to the PF anchor/drift).
+
+The `src` and kernel copies were kept numerically identical (`predict_pf_well`
+`np.array_equal` parity verified on a screen well).
+
+**Result — not promoted (large regression).** The gate is the leak-free fold-0
+toe-holdout `gold` RMSE vs the current champion (**11.074**, the SOT-2442
+beam+NCC pool). The candidate fails the mandatory screen pre-gate decisively:
+
+| Stage (fold-0, leak-free) | Champion | SOT-2443 candidate |
+| --- | ---: | ---: |
+| screen `gold` RMSE (5 wells) | 5.778 | **35.867** (blend 37.096 / pf 45.642) |
+| confirm `gold` RMSE (156 wells / 746,360 rows) | 11.074 | **23.452** (blend 24.130 / pf 28.074) |
+
+A per-component isolation of the **PF-only** pooled screen RMSE (5 wells) shows
+*every* piece regresses the already-tuned champion filter — nothing is salvageable:
+
+| PF configuration | pf screen RMSE |
+| --- | ---: |
+| champion (raw GR, median drift) | **2.980** |
+| WLS only (raw GR) | 5.327 |
+| SavGol only (no detrend) + median drift | 38.175 |
+| SavGol + detrend + median drift | 41.073 |
+| SavGol only (no detrend) + WLS | 36.693 |
+| full (SavGol + detrend + WLS) | 45.642 |
+
+**Root cause.** The champion PF localizes TVT by matching the *raw* GR wiggle
+against the typewell GR-vs-TVT signature. Savitzky-Golay smoothing removes exactly
+the high-frequency marker features the likelihood relies on (2.98 → 38.2, a ~13×
+regression on its own); detrending the two logs over different depth axes
+(MD vs TVT) with different sampling further decorrelates them; and the exp-decay
+tail-weighted anchor/drift is worse than anchoring at the last known row with a
+median heel slope (2.98 → 5.33). This matches the a-priori: all four public
+notebooks (LB 9.251–10.811) already score *worse* than our champion (LB 8.739),
+so their conditioning does not transfer to our tuned pipeline.
+
+`src/physics.py`, `kaggle/rogii-claude-baseline.py`, `champion.json`, the kernel,
+and `submission.csv` remain **unchanged** (implementation reverted); `pytest`
+stays green (the change is docs + ledger only). No Kaggle submission was made
+(submission ownership stays with parent SOT-2438).
